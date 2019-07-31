@@ -13,18 +13,18 @@ object datas {
   // def schema[A]: Schema[A] = ???
   def schema[A[_[_]]]: Schema[User] =
     //todo derivation
-    Schema(TableName("user"), User[Column](Column.named("name"), Column.named("age")))
+    Schema(TableName("users"), User[Column](Column.named("name"), Column.named("age")))
 
   final case class TableName(value: String) extends AnyVal
 
   final case class Schema[A[F[_]]](table: TableName, lifted: A[Column]) {
-    def select[Queried](selection: A[Column] => Column[Queried]): Query[A, Queried] = Query(table, lifted, selection, Chain.empty)
+    def select[Queried](selection: A[Column] => Column[Queried]): Query[A, Queried] = Query(table, lifted, selection(lifted), Chain.empty)
   }
 
   import cats.Id
 
   def all[A[_[_]]]: Column[A[Id]] = Column.all
-  def equal[Tpe](l: Column[Tpe], r: Column[Tpe]): Filter = Filter(l.compileSQL ++ fr0" = " ++ r.compileSQL)
+  def over[Tpe](l: Column[Tpe], r: Column[Tpe]): Filter = Filter(l.compileSQL ++ fr0" > " ++ r.compileSQL)
   def nonEqual[Tpe](l: Column[Tpe], r: Column[Tpe]): Filter = Filter(l.compileSQL ++ fr0" <> " ++ r.compileSQL)
 
   sealed trait Column[Tpe] extends Product with Serializable {
@@ -55,17 +55,12 @@ object datas {
     }
   }
 
-  final case class Query[A[_[_]], Queried](
-    table: TableName,
-    lifted: A[Column],
-    selection: A[Column] => Column[Queried],
-    filters: Chain[A[Column] => Filter]
-  ) {
-    def where(filter: A[Column] => Filter): Query[A, Queried] = copy(filters = filters.append(filter))
+  final case class Query[A[_[_]], Queried](table: TableName, lifted: A[Column], selection: Column[Queried], filters: Chain[Filter]) {
+    def where(filter: A[Column] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(lifted)))
 
     def compileSql(implicit read: Read[Queried]): Query0[Queried] =
-      (fr0"select " ++ selection(lifted).compileSQL ++ fr0" from " ++ Fragment.const(table.value) ++ Fragments.whereAnd(
-        filters.map(_.apply(lifted)).toList.map(_.compileSql): _*
+      (fr0"select " ++ selection.compileSQL ++ fr0" from " ++ Fragment.const(table.value) ++ Fragments.whereAnd(
+        filters.toList.map(_.compileSql): _*
       )).query[Queried]
   }
 
@@ -80,11 +75,14 @@ object Demo extends IOApp {
   val q =
     schema[User]
       .select(u => (all[User], u.name, u.age).tupled)
-      .where(u => equal(u.age, Column.const(18)))
+      .where(u => over(u.age, Column.const(18)))
       .where(u => nonEqual(u.name, Column.const("John")))
 
+  val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
+
   def run(args: List[String]): IO[ExitCode] =
-    IO(
+    IO {
+      println(q)
       println(q.compileSql.sql)
-    ).as(ExitCode.Success)
+    } *> q.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain.as(ExitCode.Success)
 }

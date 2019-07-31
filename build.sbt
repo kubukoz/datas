@@ -27,6 +27,7 @@ val commonSettings = Seq(
   updateOptions := updateOptions.value.withGigahorse(false), //may fix publishing bug
   libraryDependencies ++= Seq(
     "org.tpolecat" %% "doobie-core" % "0.7.0",
+    "org.tpolecat" %% "doobie-postgres" % "0.7.0",
     "org.typelevel" %% "cats-effect" % "1.3.1",
     "org.scalatest" %% "scalatest" % "3.0.8" % Test
   ) ++ compilerPlugins
