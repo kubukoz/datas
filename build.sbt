@@ -15,7 +15,8 @@ inThisBuild(
 
 val compilerPlugins = List(
   compilerPlugin("org.scalamacros" % "paradise" % "2.1.1").cross(CrossVersion.full),
-  compilerPlugin("org.spire-math" %% "kind-projector" % "0.9.8")
+  compilerPlugin("org.spire-math" %% "kind-projector" % "0.9.8"),
+  compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
 )
 
 val commonSettings = Seq(
@@ -25,6 +26,7 @@ val commonSettings = Seq(
   name := "datas",
   updateOptions := updateOptions.value.withGigahorse(false), //may fix publishing bug
   libraryDependencies ++= Seq(
+    "org.tpolecat" %% "doobie-core" % "0.7.0",
     "org.typelevel" %% "cats-effect" % "1.3.1",
     "org.scalatest" %% "scalatest" % "3.0.8" % Test
   ) ++ compilerPlugins
