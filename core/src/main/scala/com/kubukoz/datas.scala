@@ -2,11 +2,7 @@ package com.kubukoz
 
 import cats.effect._
 import cats.implicits._
-import cats.Invariant
 import cats.InvariantSemigroupal
-import com.kubukoz.datas.Column.Raw
-import com.kubukoz.datas.Column.Const
-import com.kubukoz.datas.Column.IMap
 
 object datas {
 
