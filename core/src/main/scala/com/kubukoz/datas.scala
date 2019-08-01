@@ -58,7 +58,7 @@ object datas {
   def nonEqual[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter = binary(l, r)(_ ++ fr0" <> " ++ _)
 
   def binary(l: Reference[Any], r: Reference[Any])(f: (Fragment, Fragment) => Fragment): Filter =
-    Filter(compiler => f(compiler.compileColumn(l), compiler.compileColumn(r)))
+    Filter(compiler => f(compiler.compileReference(l), compiler.compileReference(r)))
 
   final case class Column(name: String) extends AnyVal
 
@@ -92,13 +92,13 @@ object datas {
   ) {
     def where(filter: A[Reference] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(lifted)))
 
-    private val compiler: ColumnCompiler = new ColumnCompiler {
+    private val compiler: ReferenceCompiler = new ReferenceCompiler {
 
-      def compileColumn(column: Reference[Any]): Fragment = column match {
+      def compileReference(reference: Reference[Any]): Fragment = reference match {
         case Reference.All() =>
           allColumns.toNel.fold(fr0"") { cols =>
             val allColumnProduct: Reference[Any] = cols.map(Reference.column[Any]).reduceLeft(Reference.Product(_, _))
-            compileColumn(allColumnProduct)
+            compileReference(allColumnProduct)
           }
         case Reference.Column(column) => Fragment.const(column.name)
         case l: Reference.Lift[a] =>
@@ -106,22 +106,22 @@ object datas {
           val _ = put //to make scalac happy
           fr0"${l.value}"
         case Reference.Raw(sql)          => sql
-        case p: Reference.Product[_, _]  => compileColumn(p.left) ++ fr0", " ++ compileColumn(p.right)
-        case Reference.Widen(underlying) => compileColumn(underlying)
+        case p: Reference.Product[_, _]  => compileReference(p.left) ++ fr0", " ++ compileReference(p.right)
+        case Reference.Widen(underlying) => compileReference(underlying)
       }
     }
 
     def compileSql(implicit read: Read[Queried]): Query0[Queried] =
-      (fr0"select " ++ compiler.compileColumn(selection) ++ fr0" from " ++ Fragment.const(base.asInstanceOf[QueryBase.Table].name.value) ++ Fragments
+      (fr0"select " ++ compiler.compileReference(selection) ++ fr0" from " ++ Fragment.const(base.asInstanceOf[QueryBase.Table].name.value) ++ Fragments
         .whereAnd(
           filters.toList.map(_.compileSql(compiler)): _*
         )).query[Queried]
   }
 
-  final case class Filter(compileSql: ColumnCompiler => Fragment)
+  final case class Filter(compileSql: ReferenceCompiler => Fragment)
 
-  trait ColumnCompiler {
-    def compileColumn(column: Reference[Any]): Fragment
+  trait ReferenceCompiler {
+    def compileReference(column: Reference[Any]): Fragment
   }
 }
 
