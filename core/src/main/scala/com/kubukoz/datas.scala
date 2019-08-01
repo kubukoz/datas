@@ -17,15 +17,15 @@ object datas {
   //todo derivation
   //todo make sure schema must have a table
   def schema[A[_[_]]]: Schema[User] = {
-    type ST[X] = State[Chain[Column[Any]], X]
+    type ST[X] = State[Chain[Reference[Any]], X]
 
-    def column[Tpe](name: String): ST[Column[Tpe]] = State { state =>
-      val col = Column.named[Nothing](name)
+    def column[Tpe](name: String): ST[Reference[Tpe]] = State { state =>
+      val col = Reference.named[Nothing](name)
 
       (state.append(col), col)
     }
 
-    val schemaState: ST[User[Column]] = (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Column])
+    val schemaState: ST[User[Reference]] = (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference])
 
     val (columns, data) = schemaState.run(Chain.empty).value
 
@@ -40,9 +40,9 @@ object datas {
     final case class Table(name: TableName) extends QueryBase
   }
 
-  final case class Schema[A[F[_]]](base: QueryBase, lifted: A[Column], allColumns: List[Column[Any]]) {
+  final case class Schema[A[F[_]]](base: QueryBase, lifted: A[Reference], allColumns: List[Reference[Any]]) {
 
-    def select[Queried](selection: A[Column] => Column[Queried]): Query[A, Queried] =
+    def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(base, lifted, selection(lifted), Chain.empty, allColumns)
   }
 
@@ -50,58 +50,58 @@ object datas {
 
   //todo this should require a schema or querybase, but in a way that'll make it non-intrusive for users
   //todo consider including columns in data structure (User)?
-  def all[A[_[_]]]: Column[A[Id]] = Column.All()
+  def all[A[_[_]]]: Reference[A[Id]] = Reference.All()
 
-  def over[Tpe](l: Column[Tpe], r: Column[Tpe]): Filter =
+  def over[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter =
     binary(l, r)(_ ++ fr0" > " ++ _)
 
-  def nonEqual[Tpe](l: Column[Tpe], r: Column[Tpe]): Filter = binary(l, r)(_ ++ fr0" <> " ++ _)
+  def nonEqual[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter = binary(l, r)(_ ++ fr0" <> " ++ _)
 
-  def binary(l: Column[Any], r: Column[Any])(f: (Fragment, Fragment) => Fragment): Filter =
+  def binary(l: Reference[Any], r: Reference[Any])(f: (Fragment, Fragment) => Fragment): Filter =
     Filter(compiler => f(compiler.compileColumn(l), compiler.compileColumn(r)))
 
-  sealed trait Column[+Tpe] extends Product with Serializable
+  sealed trait Reference[+Tpe] extends Product with Serializable
 
-  object Column {
-    final case class All[Tpe]() extends Column[Tpe]
-    final case class Named[Tpe](name: String) extends Column[Tpe]
-    final case class Lift[Tpe](value: Tpe, into: Put[Tpe]) extends Column[Tpe]
-    final case class Raw[Tpe](sql: Fragment) extends Column[Tpe]
-    final case class Product[L, R](left: Column[L], right: Column[R]) extends Column[(L, R)]
-    final case class Widen[A, B](underlying: Column[A]) extends Column[B]
+  object Reference {
+    final case class All[Tpe]() extends Reference[Tpe]
+    final case class Named[Tpe](name: String) extends Reference[Tpe]
+    final case class Lift[Tpe](value: Tpe, into: Put[Tpe]) extends Reference[Tpe]
+    final case class Raw[Tpe](sql: Fragment) extends Reference[Tpe]
+    final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
+    final case class Widen[A, B](underlying: Reference[A]) extends Reference[B]
 
-    def named[Tpe](name: String): Column[Tpe] = Named(name)
-    def lift[Tpe: Put](value: Tpe): Column[Tpe] = Lift(value, Put[Tpe])
-    def raw[Tpe: Show](value: Fragment): Column[Tpe] = Raw(value)
+    def named[Tpe](name: String): Reference[Tpe] = Named(name)
+    def lift[Tpe: Put](value: Tpe): Reference[Tpe] = Lift(value, Put[Tpe])
+    def raw[Tpe: Show](value: Fragment): Reference[Tpe] = Raw(value)
 
-    implicit val invariant: InvariantSemigroupal[Column] = new InvariantSemigroupal[Column] {
-      def imap[A, B](fa: Column[A])(f: A => B)(g: B => A): Column[B] = Widen(fa)
-      def product[A, B](fa: Column[A], fb: Column[B]): Column[(A, B)] = Product(fa, fb)
+    implicit val invariant: InvariantSemigroupal[Reference] = new InvariantSemigroupal[Reference] {
+      def imap[A, B](fa: Reference[A])(f: A => B)(g: B => A): Reference[B] = Widen(fa)
+      def product[A, B](fa: Reference[A], fb: Reference[B]): Reference[(A, B)] = Product(fa, fb)
     }
   }
 
   final case class Query[A[_[_]], Queried](
     base: QueryBase,
-    lifted: A[Column],
-    selection: Column[Queried],
+    lifted: A[Reference],
+    selection: Reference[Queried],
     filters: Chain[Filter],
     //todo this should somehow be bundled into base or the whole schema should be carried around
-    allColumns: List[Column[Any]]
+    allColumns: List[Reference[Any]]
   ) {
-    def where(filter: A[Column] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(lifted)))
+    def where(filter: A[Reference] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(lifted)))
 
     private val compiler: ColumnCompiler = new ColumnCompiler {
 
-      def compileColumn(column: Column[Any]): Fragment = column match {
-        case Column.All()       => allColumns.toNel.fold(fr0"")(cols => compileColumn(cols.reduceLeft(Column.Product(_, _))))
-        case Column.Named(name) => Fragment.const(name)
-        case l: Column.Lift[a] =>
+      def compileColumn(column: Reference[Any]): Fragment = column match {
+        case Reference.All()       => allColumns.toNel.fold(fr0"")(cols => compileColumn(cols.reduceLeft(Reference.Product(_, _))))
+        case Reference.Named(name) => Fragment.const(name)
+        case l: Reference.Lift[a] =>
           implicit val put: Put[a] = l.into
           val _ = put //to make scalac happy
           fr0"${l.value}"
-        case Column.Raw(sql)          => sql
-        case p: Column.Product[_, _]  => compileColumn(p.left) ++ fr0", " ++ compileColumn(p.right)
-        case Column.Widen(underlying) => compileColumn(underlying)
+        case Reference.Raw(sql)          => sql
+        case p: Reference.Product[_, _]  => compileColumn(p.left) ++ fr0", " ++ compileColumn(p.right)
+        case Reference.Widen(underlying) => compileColumn(underlying)
       }
     }
 
@@ -115,7 +115,7 @@ object datas {
   final case class Filter(compileSql: ColumnCompiler => Fragment)
 
   trait ColumnCompiler {
-    def compileColumn(column: Column[Any]): Fragment
+    def compileColumn(column: Reference[Any]): Fragment
   }
 }
 
@@ -127,8 +127,8 @@ object Demo extends IOApp {
   val q =
     schema[User]
       .select(u => (all[User], u.name, u.age).tupled)
-      .where(u => over(u.age, Column.lift(18)))
-      .where(u => nonEqual(u.name, Column.lift("John")))
+      .where(u => over(u.age, Reference.lift(18)))
+      .where(u => nonEqual(u.name, Reference.lift("John")))
 
   val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
 
