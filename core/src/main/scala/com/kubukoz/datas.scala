@@ -17,12 +17,12 @@ object datas {
   //todo derivation
   //todo make sure schema must have a table
   def schema[A[_[_]]]: Schema[User] = {
-    type ST[X] = State[Chain[Reference[Any]], X]
+    type ST[X] = State[Chain[Column], X]
 
-    def column[Tpe](name: String): ST[Reference[Tpe]] = State { state =>
-      val col = Reference.named[Nothing](name)
+    def column[Tpe](name: String): ST[Reference[Tpe]] = {
+      val col = Column(name)
 
-      (state.append(col), col)
+      State.modify[Chain[Column]](_.append(col)).as(Reference.Column(col))
     }
 
     val schemaState: ST[User[Reference]] = (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference])
@@ -40,7 +40,7 @@ object datas {
     final case class Table(name: TableName) extends QueryBase
   }
 
-  final case class Schema[A[F[_]]](base: QueryBase, lifted: A[Reference], allColumns: List[Reference[Any]]) {
+  final case class Schema[A[F[_]]](base: QueryBase, lifted: A[Reference], allColumns: List[Column]) {
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(base, lifted, selection(lifted), Chain.empty, allColumns)
@@ -60,17 +60,19 @@ object datas {
   def binary(l: Reference[Any], r: Reference[Any])(f: (Fragment, Fragment) => Fragment): Filter =
     Filter(compiler => f(compiler.compileColumn(l), compiler.compileColumn(r)))
 
+  final case class Column(name: String) extends AnyVal
+
   sealed trait Reference[+Tpe] extends Product with Serializable
 
   object Reference {
     final case class All[Tpe]() extends Reference[Tpe]
-    final case class Named[Tpe](name: String) extends Reference[Tpe]
+    final case class Column[Tpe](col: datas.Column) extends Reference[Tpe]
     final case class Lift[Tpe](value: Tpe, into: Put[Tpe]) extends Reference[Tpe]
     final case class Raw[Tpe](sql: Fragment) extends Reference[Tpe]
     final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
     final case class Widen[A, B](underlying: Reference[A]) extends Reference[B]
 
-    def named[Tpe](name: String): Reference[Tpe] = Named(name)
+    def column[Tpe](col: datas.Column): Reference[Tpe] = Column(col)
     def lift[Tpe: Put](value: Tpe): Reference[Tpe] = Lift(value, Put[Tpe])
     def raw[Tpe: Show](value: Fragment): Reference[Tpe] = Raw(value)
 
@@ -86,15 +88,19 @@ object datas {
     selection: Reference[Queried],
     filters: Chain[Filter],
     //todo this should somehow be bundled into base or the whole schema should be carried around
-    allColumns: List[Reference[Any]]
+    allColumns: List[Column]
   ) {
     def where(filter: A[Reference] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(lifted)))
 
     private val compiler: ColumnCompiler = new ColumnCompiler {
 
       def compileColumn(column: Reference[Any]): Fragment = column match {
-        case Reference.All()       => allColumns.toNel.fold(fr0"")(cols => compileColumn(cols.reduceLeft(Reference.Product(_, _))))
-        case Reference.Named(name) => Fragment.const(name)
+        case Reference.All() =>
+          allColumns.toNel.fold(fr0"") { cols =>
+            val allColumnProduct: Reference[Any] = cols.map(Reference.column[Any]).reduceLeft(Reference.Product(_, _))
+            compileColumn(allColumnProduct)
+          }
+        case Reference.Column(column) => Fragment.const(column.name)
         case l: Reference.Lift[a] =>
           implicit val put: Put[a] = l.into
           val _ = put //to make scalac happy
