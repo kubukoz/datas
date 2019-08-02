@@ -14,9 +14,7 @@ object datas {
 
   // def schema[A]: Schema[A] = ???
 
-  //todo derivation
-  //todo make sure schema must have a table
-  def schema[A[_[_]]]: Schema[User] = {
+  object schemas {
     type ST[X] = State[Chain[Column], X]
 
     def column[Tpe](name: String): ST[Reference[Tpe]] = {
@@ -25,12 +23,17 @@ object datas {
       State.modify[Chain[Column]](_.append(col)).as(Reference.Column(col))
     }
 
-    val schemaState: ST[User[Reference]] = (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference])
+    def caseClassSchema[F[_[_]]](table: TableName, stClass: ST[F[Reference]]): Schema[F] = {
+      val (columns, data) = stClass.run(Chain.empty).value
 
-    val (columns, data) = schemaState.run(Chain.empty).value
+      Schema(QueryBase.Table(table), data, columns.toList)
+    }
 
-    Schema(QueryBase.Table(TableName("users")), data, columns.toList)
+    val userSchema: Schema[User] =
+      caseClassSchema(TableName("users"), (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference]))
   }
+  //todo derivation
+  //todo make sure schema must have a table
 
   final case class TableName(value: String) extends AnyVal
 
@@ -40,10 +43,18 @@ object datas {
     final case class Table(name: TableName) extends QueryBase
   }
 
-  final case class Schema[A[F[_]]](base: QueryBase, lifted: A[Reference], allColumns: List[Column]) {
+  final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F])
+
+  final case class Schema[A[_[_]]](base: QueryBase, lifted: A[Reference], allColumns: List[Column]) {
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(base, lifted, selection(lifted), Chain.empty, allColumns)
+
+    def leftJoin[Another[_[_]]](
+      anotherSchema: Schema[Another]
+    )(
+      how: (A[Reference], Another[Reference]) => Filter
+    ): Schema[Tuple2KK[A, Another, ?[_]]] = ???
   }
 
   import cats.Id
@@ -54,6 +65,11 @@ object datas {
 
   def over[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter =
     binary(l, r)(_ ++ fr0" > " ++ _)
+
+  def onEqual[A[_[_]], B[_[_]], Tpe](
+    l: A[Reference] => Reference[Tpe],
+    r: B[Reference] => Reference[Tpe]
+  ): (A[Reference], B[Reference]) => Filter = (a, b) => binary(l(a), r(b))(_ ++ fr0" + " ++ _)
 
   def nonEqual[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter = binary(l, r)(_ ++ fr0" <> " ++ _)
 
@@ -126,21 +142,34 @@ object datas {
 }
 
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
+final case class Book[F[_]](id: F[Long], userId: F[Long])
 
 object Demo extends IOApp {
   import datas._
 
+  val bookSchema: Schema[Book] =
+    schemas.caseClassSchema(TableName("books"), (schemas.column[Long]("id"), schemas.column[Long]("user_id")).mapN(Book[Reference]))
+
   val q =
-    schema[User]
+    schemas
+      .userSchema
       .select(u => (all[User], u.name, u.age).tupled)
       .where(u => over(u.age, Reference.lift(18)))
       .where(u => nonEqual(u.name, Reference.lift("John")))
+
+  val q2 =
+    bookSchema.leftJoin(schemas.userSchema)(onEqual(_.userId, _.id)).select { t =>
+      (all[User], t.left.id, t.right.name, t.right.age).tupled
+    }
+  // .where(u => over(u.age, Reference.lift(18)))
+  // .where(u => nonEqual(u.name, Reference.lift("John")))
 
   val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
 
   def run(args: List[String]): IO[ExitCode] =
     IO {
-      println(q)
-      println(q.compileSql.sql)
-    } *> q.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain.as(ExitCode.Success)
+      println("\n\nstarting")
+      println(q2)
+      println(q2.compileSql.sql)
+    } *> q2.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain *> IO(println("\n\n")).as(ExitCode.Success)
 }
