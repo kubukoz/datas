@@ -129,11 +129,11 @@ object datas {
       val selectFrag = fr0"select "
       val whereFrag = Fragments.whereAnd(filters.map(_.compileSql(compiler)).toList: _*)
 
-      val compiled = compiler.compileReference(selection)
+      val compiledSelection = compiler.compileReference(selection)
 
-      val frag = selectFrag ++ compiled.frag ++ base.compileAsFrom ++ whereFrag
+      val frag = selectFrag ++ compiledSelection.frag ++ base.compileAsFrom ++ whereFrag
 
-      implicit val read: Read[Queried] = compiled.read
+      implicit val read: Read[Queried] = compiledSelection.read
       frag.query[Queried]
     }
   }
@@ -179,10 +179,10 @@ object datas {
           case Some(nes) => nes.stringify + "." + s
         }
 
-      private def compileScoped[F[_]: Monad, Type](reference: Reference[Type])(implicit L: Scope.Local[F]): F[TypedFragment[Type]] =
+      private def compileScoped[F[_]: Applicative: Scope.Local, Type](reference: Reference[Type]): F[TypedFragment[Type]] =
         reference match {
           case imap: Reference.Map[a, b] =>
-            compileScoped[F, a](imap.underlying).map(_.map(imap.f)) //todo g unused? makes sense
+            compileScoped[F, a](imap.underlying).map(_.map(imap.f))
           case product: Reference.Product[a, b] =>
             val left = compileScoped[F, a](product.left)
             val right = compileScoped[F, b](product.right)
@@ -195,15 +195,17 @@ object datas {
             }
 
           case Reference.Single(data, read) =>
-            data match {
-              case ReferenceData.Column(column) =>
-                scopedFrag[F]("\"" + column.name + "\"").map(Fragment.const(_)).map(TypedFragment[Type](_, read))
-              case l: ReferenceData.Lift[a] =>
-                implicit val put = l.into
-                val _ = put //to make scalac happy
-                TypedFragment[Type](fr0"${l.value}", read).pure[F]
-            }
+            compileScopedData[F, Type](read).apply(data)
         }
+
+      private def compileScopedData[F[_]: Scope.Ask: Applicative, Type](read: Read[Type]): ReferenceData[Type] => F[TypedFragment[Type]] = {
+        case ReferenceData.Column(column) =>
+          scopedFrag[F]("\"" + column.name + "\"").map(Fragment.const(_)).map(TypedFragment[Type](_, read))
+        case l: ReferenceData.Lift[a] =>
+          implicit val put = l.into
+          val _ = put //to make scalac happy
+          TypedFragment[Type](fr0"${l.value}", read).pure[F]
+      }
 
       def compileReference[Type](reference: Reference[Type]): TypedFragment[Type] =
         compileScoped[Reader[Scope, ?], Type](reference).run(Chain.empty)
