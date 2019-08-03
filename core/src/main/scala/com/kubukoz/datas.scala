@@ -7,6 +7,7 @@ import doobie.util.fragment.Fragment
 import doobie._
 import doobie.implicits._
 import cats.data.Chain
+import cats.data.NonEmptyChain
 import cats.data.State
 import cats.Show
 import cats.Applicative
@@ -14,6 +15,7 @@ import com.kubukoz.datas.Reference.Scoped
 import cats.Monad
 import cats.data.Reader
 import cats.mtl.implicits._
+import cats.Functor
 
 object datas {
 
@@ -32,7 +34,7 @@ object datas {
       stClass
         .run(Chain.empty)
         .map {
-          case (columns, data) => Schema(QueryBase.Table(table), data, "u", columns.toList)
+          case (columns, data) => Schema(QueryBase.Table(table), data, Chain("u"), columns.toList)
         }
         .value
   }
@@ -47,11 +49,11 @@ object datas {
     final case class Table(name: TableName) extends QueryBase
   }
 
-  final case class ScopedLifted[A[_[_]]](lifted: A[Reference], scope: String) {
+  final case class ScopedLifted[A[_[_]]](lifted: A[Reference], scope: Scope) {
     def field[Queried](path: A[Reference] => Reference[Queried]): Reference[Queried] = Reference.Scoped(scope, path(lifted))
   }
 
-  final case class Schema[A[_[_]]](base: QueryBase, lifted: A[Reference], scope: String, allColumns: List[Column]) {
+  final case class Schema[A[_[_]]](base: QueryBase, lifted: A[Reference], scope: Scope, allColumns: List[Column]) {
 
     def select[Queried](selection: ScopedLifted[A] => Reference[Queried]): Query[A, Queried] =
       Query(base, lifted, selection(ScopedLifted(lifted, scope)), scope, Chain.empty, allColumns)
@@ -78,13 +80,13 @@ object datas {
   sealed trait Reference[+Type] extends Product with Serializable
 
   object Reference {
-    final case class All[Type](scope: String) extends Reference[Type]
+    final case class All[Type](scope: Scope) extends Reference[Type]
     final case class Column[Type](col: datas.Column) extends Reference[Type]
     final case class Lift[Type](value: Type, into: Put[Type]) extends Reference[Type]
     final case class Raw[Type](sql: Fragment) extends Reference[Type]
     final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
     final case class Widen[A, B](underlying: Reference[A]) extends Reference[B]
-    final case class Scoped[Type](scope: String, underlying: Reference[Type]) extends Reference[Type]
+    final case class Scoped[Type](scope: Scope, underlying: Reference[Type]) extends Reference[Type]
 
     def column[Type](col: datas.Column): Reference[Type] = Column(col)
     def lift[Type: Put](value: Type): Reference[Type] = Lift(value, Put[Type])
@@ -100,7 +102,7 @@ object datas {
     base: QueryBase,
     lifted: A[Reference],
     selection: Reference[Queried],
-    scope: String,
+    scope: Scope,
     filters: Chain[Filter],
     //todo this should somehow be bundled into base or the whole schema should be carried around
     allColumns: List[Column]
@@ -110,7 +112,7 @@ object datas {
     def compileSql(implicit read: Read[Queried]): Query0[Queried] = {
       val compiler: ReferenceCompiler = ReferenceCompiler.fromColumns(allColumns)
       (fr0"select " ++ compiler.compileReference(selection) ++ fr0" from " ++ Fragment.const(
-        base.asInstanceOf[QueryBase.Table].name.value + " " + scope
+        base.asInstanceOf[QueryBase.Table].name.value + " " + scope.stringify
       ) ++ Fragments.whereAnd(
         filters.toList.map(_.compileSql(compiler)): _*
       )).query[Queried]
@@ -125,8 +127,20 @@ object datas {
   }
 
   type Scope = Chain[String]
+  type NonEmptyScope = NonEmptyChain[String]
+
+  implicit class ScopeStringify(private val scope: Scope) extends AnyVal {
+    def stringify: String = nonEmptyScope.foldMap(_.stringify)
+    def nonEmptyScope: Option[NonEmptyScope] = NonEmptyChain.fromChain(scope)
+  }
+
+  implicit class NonEmptyScopeStringify(private val nes: NonEmptyScope) extends AnyVal {
+    def stringify: String = nes.mkString_(".")
+  }
 
   object Scope {
+    type Ask[F[_]] = cats.mtl.ApplicativeAsk[F, Scope]
+    def Ask[F[_]](implicit F: Ask[F]): Ask[F] = F
     type Local[F[_]] = cats.mtl.ApplicativeLocal[F, Scope]
     def local[F[_]](implicit L: Local[F]): Local[F] = L
   }
@@ -135,21 +149,20 @@ object datas {
 
     def fromColumns(columns: List[Column]): ReferenceCompiler = new ReferenceCompiler {
 
-      private def scopedFrag(scope: Chain[String])(s: String): String = scope.toList.toNel match {
-        case None      => s
-        case Some(nel) => nel.reduceLeft((a, b) => s"$a.$b") + "." + s
-      }
+      private def scopedFrag[F[_]: Scope.Ask: Functor](s: String): F[String] =
+        Scope.Ask[F].ask.map(_.nonEmptyScope).map {
+          case None      => s
+          case Some(nes) => nes.stringify + "." + s
+        }
 
       private def compileScoped[F[_]: Monad](reference: Reference[Any])(implicit L: Scope.Local[F]): F[Fragment] = reference match {
         case Reference.All(newScope) =>
-          L.local(_.append(newScope)) {
+          val compiledColumns =
             columns.toNel.map { _.map(Reference.column[Any]).reduceLeft(Reference.Product(_, _)) }.foldMapM(compileScoped[F])
-          }
 
-        case Reference.Column(column) =>
-          L.reader { scope =>
-            Fragment.const(scopedFrag(scope)("\"" + column.name + "\""))
-          }
+          L.local(_.concat(newScope))(compiledColumns)
+
+        case Reference.Column(column) => scopedFrag[F]("\"" + column.name + "\"").map(Fragment.const(_))
         case l: Reference.Lift[a] =>
           implicit val put: Put[a] = l.into
           val _ = put //to make scalac happy
@@ -157,7 +170,7 @@ object datas {
         case Reference.Raw(sql)           => sql.pure[F]
         case p: Reference.Product[_, _]   => (compileScoped[F](p.left), compileScoped[F](p.right)).mapN(_ ++ fr0", " ++ _)
         case Reference.Widen(underlying)  => compileScoped[F](underlying)
-        case Scoped(newScope, underlying) => L.local(_.append(newScope))(compileScoped[F](underlying))
+        case Scoped(newScope, underlying) => L.local(_.concat(newScope))(compileScoped[F](underlying))
       }
 
       def compileReference(reference: Reference[Any]): Fragment =
@@ -176,7 +189,7 @@ object Demo extends IOApp {
   import schemas.column
 
   val bookSchema: Schema[Book] =
-    caseClassSchema(TableName("books"), (column[Long]("id"), column[Long]("user_id")).mapN(Book[Reference])) //types explicit, less typing
+    caseClassSchema(TableName("books"), (column("id"), column("user_id")).mapN(Book[Reference])) //types explicit, less typing
 
   val userSchema: Schema[User] =
     caseClassSchema(
