@@ -9,6 +9,11 @@ import doobie.implicits._
 import cats.data.Chain
 import cats.data.State
 import cats.Show
+import cats.Applicative
+import com.kubukoz.datas.Reference.Scoped
+import cats.Monad
+import cats.data.Reader
+import cats.mtl.implicits._
 
 object datas {
 
@@ -17,20 +22,19 @@ object datas {
   object schemas {
     type ST[X] = State[Chain[Column], X]
 
-    def column[Tpe](name: String): ST[Reference[Tpe]] = {
+    def column[Type](name: String): ST[Reference[Type]] = {
       val col = Column(name)
 
       State.modify[Chain[Column]](_.append(col)).as(Reference.Column(col))
     }
 
-    def caseClassSchema[F[_[_]]](table: TableName, stClass: ST[F[Reference]]): Schema[F] = {
-      val (columns, data) = stClass.run(Chain.empty).value
-
-      Schema(QueryBase.Table(table), data, columns.toList)
-    }
-
-    val userSchema: Schema[User] =
-      caseClassSchema(TableName("users"), (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference]))
+    def caseClassSchema[F[_[_]]](table: TableName, stClass: ST[F[Reference]]): Schema[F] =
+      stClass
+        .run(Chain.empty)
+        .map {
+          case (columns, data) => Schema(QueryBase.Table(table), data, "u", columns.toList)
+        }
+        .value
   }
   //todo derivation
   //todo make sure schema must have a table
@@ -43,54 +47,48 @@ object datas {
     final case class Table(name: TableName) extends QueryBase
   }
 
-  final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F])
+  final case class ScopedLifted[A[_[_]]](lifted: A[Reference], scope: String) {
+    def field[Queried](path: A[Reference] => Reference[Queried]): Reference[Queried] = Reference.Scoped(scope, path(lifted))
+  }
 
-  final case class Schema[A[_[_]]](base: QueryBase, lifted: A[Reference], allColumns: List[Column]) {
+  final case class Schema[A[_[_]]](base: QueryBase, lifted: A[Reference], scope: String, allColumns: List[Column]) {
 
-    def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
-      Query(base, lifted, selection(lifted), Chain.empty, allColumns)
-
-    def leftJoin[Another[_[_]]](
-      anotherSchema: Schema[Another]
-    )(
-      how: (A[Reference], Another[Reference]) => Filter
-    ): Schema[Tuple2KK[A, Another, ?[_]]] = ???
+    def select[Queried](selection: ScopedLifted[A] => Reference[Queried]): Query[A, Queried] =
+      Query(base, lifted, selection(ScopedLifted(lifted, scope)), scope, Chain.empty, allColumns)
   }
 
   import cats.Id
 
   //todo this should require a schema or querybase, but in a way that'll make it non-intrusive for users
-  //todo consider including columns in data structure (User)?
-  def all[A[_[_]]]: Reference[A[Id]] = Reference.All()
+  def all[A[_[_]]](a: ScopedLifted[A]): Reference[A[Id]] = {
+    val _ = a
+    Reference.All(a.scope)
+  }
 
-  def over[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter =
+  def over[Type](l: Reference[Type], r: Reference[Type]): Filter =
     binary(l, r)(_ ++ fr0" > " ++ _)
 
-  def onEqual[A[_[_]], B[_[_]], Tpe](
-    l: A[Reference] => Reference[Tpe],
-    r: B[Reference] => Reference[Tpe]
-  ): (A[Reference], B[Reference]) => Filter = (a, b) => binary(l(a), r(b))(_ ++ fr0" + " ++ _)
-
-  def nonEqual[Tpe](l: Reference[Tpe], r: Reference[Tpe]): Filter = binary(l, r)(_ ++ fr0" <> " ++ _)
+  def nonEqual[Type](l: Reference[Type], r: Reference[Type]): Filter = binary(l, r)(_ ++ fr0" <> " ++ _)
 
   def binary(l: Reference[Any], r: Reference[Any])(f: (Fragment, Fragment) => Fragment): Filter =
     Filter(compiler => f(compiler.compileReference(l), compiler.compileReference(r)))
 
   final case class Column(name: String) extends AnyVal
 
-  sealed trait Reference[+Tpe] extends Product with Serializable
+  sealed trait Reference[+Type] extends Product with Serializable
 
   object Reference {
-    final case class All[Tpe]() extends Reference[Tpe]
-    final case class Column[Tpe](col: datas.Column) extends Reference[Tpe]
-    final case class Lift[Tpe](value: Tpe, into: Put[Tpe]) extends Reference[Tpe]
-    final case class Raw[Tpe](sql: Fragment) extends Reference[Tpe]
+    final case class All[Type](scope: String) extends Reference[Type]
+    final case class Column[Type](col: datas.Column) extends Reference[Type]
+    final case class Lift[Type](value: Type, into: Put[Type]) extends Reference[Type]
+    final case class Raw[Type](sql: Fragment) extends Reference[Type]
     final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
     final case class Widen[A, B](underlying: Reference[A]) extends Reference[B]
+    final case class Scoped[Type](scope: String, underlying: Reference[Type]) extends Reference[Type]
 
-    def column[Tpe](col: datas.Column): Reference[Tpe] = Column(col)
-    def lift[Tpe: Put](value: Tpe): Reference[Tpe] = Lift(value, Put[Tpe])
-    def raw[Tpe: Show](value: Fragment): Reference[Tpe] = Raw(value)
+    def column[Type](col: datas.Column): Reference[Type] = Column(col)
+    def lift[Type: Put](value: Type): Reference[Type] = Lift(value, Put[Type])
+    def raw[Type: Show](value: Fragment): Reference[Type] = Raw(value)
 
     implicit val invariant: InvariantSemigroupal[Reference] = new InvariantSemigroupal[Reference] {
       def imap[A, B](fa: Reference[A])(f: A => B)(g: B => A): Reference[B] = Widen(fa)
@@ -102,42 +100,69 @@ object datas {
     base: QueryBase,
     lifted: A[Reference],
     selection: Reference[Queried],
+    scope: String,
     filters: Chain[Filter],
     //todo this should somehow be bundled into base or the whole schema should be carried around
     allColumns: List[Column]
   ) {
-    def where(filter: A[Reference] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(lifted)))
+    def where(filter: ScopedLifted[A] => Filter): Query[A, Queried] = copy(filters = filters.append(filter(ScopedLifted(lifted, scope))))
 
-    private val compiler: ReferenceCompiler = new ReferenceCompiler {
-
-      def compileReference(reference: Reference[Any]): Fragment = reference match {
-        case Reference.All() =>
-          allColumns.toNel.fold(fr0"") { cols =>
-            val allColumnProduct: Reference[Any] = cols.map(Reference.column[Any]).reduceLeft(Reference.Product(_, _))
-            compileReference(allColumnProduct)
-          }
-        case Reference.Column(column) => Fragment.const(column.name)
-        case l: Reference.Lift[a] =>
-          implicit val put: Put[a] = l.into
-          val _ = put //to make scalac happy
-          fr0"${l.value}"
-        case Reference.Raw(sql)          => sql
-        case p: Reference.Product[_, _]  => compileReference(p.left) ++ fr0", " ++ compileReference(p.right)
-        case Reference.Widen(underlying) => compileReference(underlying)
-      }
+    def compileSql(implicit read: Read[Queried]): Query0[Queried] = {
+      val compiler: ReferenceCompiler = ReferenceCompiler.fromColumns(allColumns)
+      (fr0"select " ++ compiler.compileReference(selection) ++ fr0" from " ++ Fragment.const(
+        base.asInstanceOf[QueryBase.Table].name.value + " " + scope
+      ) ++ Fragments.whereAnd(
+        filters.toList.map(_.compileSql(compiler)): _*
+      )).query[Queried]
     }
-
-    def compileSql(implicit read: Read[Queried]): Query0[Queried] =
-      (fr0"select " ++ compiler.compileReference(selection) ++ fr0" from " ++ Fragment.const(base.asInstanceOf[QueryBase.Table].name.value) ++ Fragments
-        .whereAnd(
-          filters.toList.map(_.compileSql(compiler)): _*
-        )).query[Queried]
   }
-
-  final case class Filter(compileSql: ReferenceCompiler => Fragment)
+  final case class Filter(compileSql: ReferenceCompiler => Fragment) {
+    def and(another: Filter): Filter = Filter((compileSql, another.compileSql).mapN(Fragments.and(_, _)))
+  }
 
   trait ReferenceCompiler {
     def compileReference(column: Reference[Any]): Fragment
+  }
+
+  type Scope = Chain[String]
+
+  object Scope {
+    type Local[F[_]] = cats.mtl.ApplicativeLocal[F, Scope]
+    def local[F[_]](implicit L: Local[F]): Local[F] = L
+  }
+
+  object ReferenceCompiler {
+
+    def fromColumns(columns: List[Column]): ReferenceCompiler = new ReferenceCompiler {
+
+      private def scopedFrag(scope: Chain[String])(s: String): String = scope.toList.toNel match {
+        case None      => s
+        case Some(nel) => nel.reduceLeft((a, b) => s"$a.$b") + "." + s
+      }
+
+      private def compileScoped[F[_]: Monad](reference: Reference[Any])(implicit L: Scope.Local[F]): F[Fragment] = reference match {
+        case Reference.All(newScope) =>
+          L.local(_.append(newScope)) {
+            columns.toNel.map { _.map(Reference.column[Any]).reduceLeft(Reference.Product(_, _)) }.foldMapM(compileScoped[F])
+          }
+
+        case Reference.Column(column) =>
+          L.reader { scope =>
+            Fragment.const(scopedFrag(scope)("\"" + column.name + "\""))
+          }
+        case l: Reference.Lift[a] =>
+          implicit val put: Put[a] = l.into
+          val _ = put //to make scalac happy
+          fr0"${l.value}".pure[F]
+        case Reference.Raw(sql)           => sql.pure[F]
+        case p: Reference.Product[_, _]   => (compileScoped[F](p.left), compileScoped[F](p.right)).mapN(_ ++ fr0", " ++ _)
+        case Reference.Widen(underlying)  => compileScoped[F](underlying)
+        case Scoped(newScope, underlying) => L.local(_.append(newScope))(compileScoped[F](underlying))
+      }
+
+      def compileReference(reference: Reference[Any]): Fragment =
+        compileScoped[Reader[Scope, ?]](reference).run(Chain.empty)
+    }
   }
 }
 
@@ -147,29 +172,30 @@ final case class Book[F[_]](id: F[Long], userId: F[Long])
 object Demo extends IOApp {
   import datas._
 
+  import schemas.caseClassSchema
+  import schemas.column
+
   val bookSchema: Schema[Book] =
-    schemas.caseClassSchema(TableName("books"), (schemas.column[Long]("id"), schemas.column[Long]("user_id")).mapN(Book[Reference]))
+    caseClassSchema(TableName("books"), (column[Long]("id"), column[Long]("user_id")).mapN(Book[Reference])) //types explicit, less typing
+
+  val userSchema: Schema[User] =
+    caseClassSchema(
+      TableName("users"),
+      Applicative[schemas.ST].map3(column("id"), column("name"), column("age"))(User[Reference]) //types automatically inferred
+    )
 
   val q =
-    schemas
-      .userSchema
-      .select(u => (all[User], u.name, u.age).tupled)
-      .where(u => over(u.age, Reference.lift(18)))
-      .where(u => nonEqual(u.name, Reference.lift("John")))
-
-  val q2 =
-    bookSchema.leftJoin(schemas.userSchema)(onEqual(_.userId, _.id)).select { t =>
-      (all[User], t.left.id, t.right.name, t.right.age).tupled
-    }
-  // .where(u => over(u.age, Reference.lift(18)))
-  // .where(u => nonEqual(u.name, Reference.lift("John")))
+    userSchema
+      .select(u => (all(u), u.field(u => (u.name, u.age).tupled)).tupled)
+      .where(u => over(u.field(_.age), Reference.lift(18)))
+      .where(u => nonEqual(u.field(_.name), Reference.lift("John")))
 
   val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
 
   def run(args: List[String]): IO[ExitCode] =
     IO {
       println("\n\nstarting")
-      println(q2)
-      println(q2.compileSql.sql)
-    } *> q2.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain *> IO(println("\n\n")).as(ExitCode.Success)
+      println(q)
+      println(q.compileSql.sql)
+    } *> q.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain *> IO(println("\n\n")).as(ExitCode.Success)
 }
