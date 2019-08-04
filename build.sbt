@@ -11,7 +11,8 @@ inThisBuild(
         url("https://kubukoz.com")
       )
     )
-  ))
+  )
+)
 
 val compilerPlugins = List(
   compilerPlugin("org.scalamacros" % "paradise" % "2.1.1").cross(CrossVersion.full),
@@ -28,17 +29,12 @@ val commonSettings = Seq(
   libraryDependencies ++= Seq(
     "org.tpolecat" %% "doobie-core" % "0.7.0",
     "org.tpolecat" %% "doobie-postgres" % "0.7.0",
-    "org.typelevel" %% "cats-effect" % "1.3.1",
+    "org.typelevel" %% "cats-effect" % "1.4.0",
+    "org.typelevel" %% "cats-tagless-macros" % "0.5",
+    "org.typelevel" %% "cats-mtl-core" % "0.6.0",
     "org.scalatest" %% "scalatest" % "3.0.8" % Test
   ) ++ compilerPlugins
 )
 
-val core = project.settings(commonSettings).settings(name += "-core")
-
 val datas =
-  project
-    .in(file("."))
-    .settings(commonSettings)
-    .settings(skip in publish := true)
-    .dependsOn(core)
-    .aggregate(core)
+  project.in(file("core")).settings(commonSettings).settings(name += "-core").settings(skip in publish := true)
