@@ -143,14 +143,14 @@ object datas {
       copy(filters = filters.append(filter(lifted)))
 
     def compileSql: Query0[Queried] = {
-      val selectFrag = fr0"select "
-      val whereFrag = Fragments.whereAnd(filters.map(_.compileSql).toList: _*)
-
       val compiledSelection = selection.compile
 
-      val frag = selectFrag ++ compiledSelection.frag ++ fr"from" ++ base.compileAsFrom ++ whereFrag
-
       implicit val read: Read[Queried] = compiledSelection.read
+
+      val frag = fr0"select " ++ compiledSelection.frag ++
+        fr"from" ++ base.compileAsFrom ++
+        Fragments.whereAnd(filters.map(_.compileSql).toList: _*)
+
       frag.query[Queried]
     }
   }
@@ -165,6 +165,13 @@ object datas {
 
   final case class TypedFragment[Type](frag: Fragment, read: Read[Type]) {
     def map[B](f: Type => B): TypedFragment[B] = copy(read = read.map(f))
+
+    def product[B](another: TypedFragment[B]): TypedFragment[(Type, B)] = {
+      implicit val rl = read
+      implicit val rr = another.read
+      val _ = (rl, rr)
+      TypedFragment(frag ++ fr0", " ++ another.frag, Read[(Type, B)])
+    }
   }
 
   object ReferenceCompiler {
@@ -172,21 +179,12 @@ object datas {
     val default: ReferenceCompiler = new ReferenceCompiler {
       private def compileScoped[F[_]: Applicative, Type](reference: Reference[Type]): F[TypedFragment[Type]] =
         reference match {
-          case imap: Reference.Map[a, b] =>
-            compileScoped[F, a](imap.underlying).map(_.map(imap.f))
-          case product: Reference.Product[a, b] =>
-            (compileScoped[F, a](product.left), compileScoped[F, b](product.right)).mapN { (l, r) =>
-              implicit val rl = l.read
-              implicit val rr = r.read
-              val _ = (rl, rr)
-              TypedFragment[(a, b)](l.frag ++ fr0", " ++ r.frag, Read[(a, b)])
-            }
-
-          case Reference.Single(data, read) =>
-            compileScopedData[F, Type](read).apply(data)
+          case Reference.Single(data, read) => compileData[F, Type](read).apply(data)
+          case m: Reference.Map[a, b]       => compileScoped[F, a](m.underlying).map(_.map(m.f))
+          case p: Reference.Product[a, b]   => (compileScoped[F, a](p.left), compileScoped[F, b](p.right)).mapN(_ product _)
         }
 
-      private def compileScopedData[F[_]: Applicative, Type](read: Read[Type]): ReferenceData[Type] => F[TypedFragment[Type]] = {
+      private def compileData[F[_]: Applicative, Type](read: Read[Type]): ReferenceData[Type] => F[TypedFragment[Type]] = {
         case ReferenceData.Column(column) =>
           /* scopedFrag[F]("\"" + column.name + "\"").map(Fragment.const(_)).map(TypedFragment[Type](_, read)) */
           TypedFragment[Type](Fragment.const("\"" + column.name + "\""), read).pure[F]
