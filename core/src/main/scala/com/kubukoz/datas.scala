@@ -53,18 +53,20 @@ object datas {
           right.compileAsFrom ++
           // Fragment.const(rightScope.stringify) ++
           fr"on" ++
-          onClause.compileSql
+          onClause.compile.frag
     }
   }
 
   object QueryBase {
     final case class SingleTable(table: Table) extends QueryBase
-    final case class LeftJoin(left: QueryBase, right: QueryBase, onClause: Filter) extends QueryBase
+    final case class LeftJoin(left: QueryBase, right: QueryBase, onClause: Reference[Boolean]) extends QueryBase
   }
 
   final case class Table(name: TableName)
 
-  final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F])
+  final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
+    def asTuple: (A[F], B[F]) = (left, right)
+  }
 
   object Tuple2KK {
     implicit def functorK[A[_[_]]: FunctorK, B[_[_]]: FunctorK]: FunctorK[Tuple2KK[A, B, ?[_]]] = new FunctorK[Tuple2KK[A, B, ?[_]]] {
@@ -74,7 +76,11 @@ object datas {
 
   final case class Schema[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference]) {
 
-    def leftJoin[B[_[_]]: FunctorK](another: Schema[B])(onClause: (A[Reference], B[Reference]) => Filter): Schema[Tuple2KK[A, B, ?[_]]] =
+    def leftJoin[B[_[_]]: FunctorK](
+      another: Schema[B]
+    )(
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
+    ): Schema[Tuple2KK[A, B, ?[_]]] =
       Schema(
         QueryBase.LeftJoin(
           base,
@@ -93,14 +99,12 @@ object datas {
       )
   }
 
-  def over[Type](l: Reference[Type], r: Reference[Type]): Filter =
-    binary(l.widen, r.widen)(_ ++ fr0" > " ++ _)
+  def over[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] = binary(_ ++ fr">" ++ _)
+  def equal[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] = binary(_ ++ fr"=" ++ _)
+  def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] = binary(_ ++ fr"<>" ++ _)
 
-  def equal[Type](l: Reference[Type], r: Reference[Type]): Filter = binary(l.widen, r.widen)(_ ++ fr0" = " ++ _)
-  def nonEqual[Type](l: Reference[Type], r: Reference[Type]): Filter = binary(l.widen, r.widen)(_ ++ fr0" <> " ++ _)
-
-  def binary(l: Reference[Any], r: Reference[Any])(f: (Fragment, Fragment) => Fragment): Filter =
-    Filter(f(l.compile.frag, r.compile.frag))
+  def binary[Type](f: (Fragment, Fragment) => Fragment)(l: Reference[Type], r: Reference[Type]): Reference[Boolean] =
+    Reference.Single(ReferenceData.Raw(f(l.compile.frag, r.compile.frag)), Read[Boolean])
 
   final case class Column(name: String) extends AnyVal
 
@@ -111,6 +115,7 @@ object datas {
   object ReferenceData {
     final case class Column[A](col: datas.Column) extends ReferenceData[A]
     final case class Lift[Type](value: Type, into: Put[Type]) extends ReferenceData[Type]
+    final case class Raw[Type](fragment: Fragment) extends ReferenceData[Type]
   }
 
   sealed trait Reference[Type] extends Product with Serializable {
@@ -137,9 +142,14 @@ object datas {
     }
   }
 
-  final case class Query[A[_[_]], Queried](base: QueryBase, lifted: A[Reference], selection: Reference[Queried], filters: Chain[Filter]) {
+  final case class Query[A[_[_]], Queried](
+    base: QueryBase,
+    lifted: A[Reference],
+    selection: Reference[Queried],
+    filters: Chain[Reference[Boolean]]
+  ) {
 
-    def where(filter: A[Reference] => Filter): Query[A, Queried] =
+    def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
       copy(filters = filters.append(filter(lifted)))
 
     def compileSql: Query0[Queried] = {
@@ -147,16 +157,12 @@ object datas {
 
       implicit val read: Read[Queried] = compiledSelection.read
 
-      val frag = fr0"select " ++ compiledSelection.frag ++
+      val frag = fr"select" ++ compiledSelection.frag ++
         fr"from" ++ base.compileAsFrom ++
-        Fragments.whereAnd(filters.map(_.compileSql).toList: _*)
+        Fragments.whereAnd(filters.map(_.compile.frag).toList: _*)
 
       frag.query[Queried]
     }
-  }
-
-  final case class Filter(compileSql: Fragment) {
-    def and(another: Filter): Filter = Filter(Fragments.and(compileSql, another.compileSql))
   }
 
   trait ReferenceCompiler {
@@ -170,7 +176,7 @@ object datas {
       implicit val rl = read
       implicit val rr = another.read
       val _ = (rl, rr)
-      TypedFragment(frag ++ fr0", " ++ another.frag, Read[(Type, B)])
+      TypedFragment(frag ++ fr"," ++ another.frag, Read[(Type, B)])
     }
   }
 
@@ -191,7 +197,9 @@ object datas {
         case l: ReferenceData.Lift[a] =>
           implicit val put = l.into
           val _ = put //to make scalac happy
-          TypedFragment[Type](fr0"${l.value}", read).pure[F]
+          TypedFragment[Type](fr"${l.value}", read).pure[F]
+        case r: ReferenceData.Raw[a] =>
+          TypedFragment[Type](r.fragment, read).pure[F]
       }
 
       def compileReference[Type](reference: Reference[Type]): TypedFragment[Type] =
@@ -234,25 +242,34 @@ object Demo extends IOApp {
 
   val q1 =
     userSchema
-      .select(u => (u.name, Reference.lift(true), u.age.map[Boolean](_ => false)).tupled)
+      .select(
+        u =>
+          (
+            u.name,
+            Reference.lift(true),
+            u.age.as(false),
+            equal(u.age, Reference.lift(23)),
+            equal(Reference.lift(5), Reference.lift(10))
+          ).tupled
+      )
       .where(u => over(u.age, Reference.lift(18)))
       .where(u => nonEqual(u.name, Reference.lift("John")))
 
   val q =
     userSchema
-      .leftJoin(bookSchema) { (u, b) =>
-        equal(u.id, b.userId)
-      }
-      .leftJoin(bookSchema) { (u, b) =>
-        equal(u.right.id, b.id)
-      }
+      .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
+      .leftJoin(bookSchema)((u, b) => equal(u.right.id, b.id))
       .select {
-        case t =>
-          (t.left.left.age, t.left.left.name, t.left.right.userId, t.right.id).tupled
+        _.asTuple.leftMap(_.asTuple) match {
+          case ((user, book1), book2) => (user.age, user.name, book1.userId, book2.id, user.id).tupled
+        }
       }
-      .where { t =>
-        equal(t.left.left.age, Reference.lift(18)) and equal(t.right.id, Reference.lift(1L))
+      .where {
+        _.asTuple.leftMap(_.asTuple) match {
+          case ((user, _), _) => equal(user.age, Reference.lift(18))
+        }
       }
+      .where(t => equal(t.right.id, Reference.lift(1L)))
 
   val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
 
