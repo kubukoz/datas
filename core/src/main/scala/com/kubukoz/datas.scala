@@ -2,27 +2,15 @@ package com.kubukoz
 
 import cats.effect._
 import cats.implicits._
-import cats.InvariantSemigroupal
 import doobie.util.fragment.Fragment
 import doobie._
 import doobie.implicits._
 import cats.data.Chain
-import cats.data.NonEmptyChain
 import cats.data.State
-import cats.Show
-import cats.Functor
 import cats.Applicative
-import cats.Monad
-import cats.data.Reader
-import cats.mtl.implicits._
-import cats.Functor
 import cats.tagless.FunctorK
 import cats.~>
 import cats.tagless.implicits._
-import cats.data.Const
-import com.kubukoz.datas.QueryBase.SingleTable
-import com.kubukoz.datas.Reference.Single
-import cats.data.Tuple2K
 import cats.Apply
 
 object datas {
@@ -56,16 +44,16 @@ object datas {
 
   sealed trait QueryBase extends Product with Serializable {
 
-    def compileAsFrom(referenceCompiler: ReferenceCompiler): Fragment = this match {
+    def compileAsFrom: Fragment = this match {
       case QueryBase.SingleTable(table) => table.name.identifierFragment
       case QueryBase.LeftJoin(left, right, onClause) =>
-        left.compileAsFrom(referenceCompiler) ++
+        left.compileAsFrom ++
           // Fragment.const(leftScope.stringify) ++
           fr"left join" ++
-          right.compileAsFrom(referenceCompiler) ++
+          right.compileAsFrom ++
           // Fragment.const(rightScope.stringify) ++
           fr"on" ++
-          onClause.compileSql(referenceCompiler)
+          onClause.compileSql
     }
   }
 
@@ -101,8 +89,7 @@ object datas {
         base,
         lifted,
         selection(lifted),
-        filters = Chain.empty,
-        compiler = ReferenceCompiler.fromColumns
+        filters = Chain.empty
       )
   }
 
@@ -113,7 +100,7 @@ object datas {
   def nonEqual[Type](l: Reference[Type], r: Reference[Type]): Filter = binary(l.widen, r.widen)(_ ++ fr0" <> " ++ _)
 
   def binary(l: Reference[Any], r: Reference[Any])(f: (Fragment, Fragment) => Fragment): Filter =
-    Filter(compiler => f(compiler.compileReference(l).frag, compiler.compileReference(r).frag))
+    Filter(f(l.compile.frag, r.compile.frag))
 
   final case class Column(name: String) extends AnyVal
 
@@ -126,7 +113,9 @@ object datas {
     final case class Lift[Type](value: Type, into: Put[Type]) extends ReferenceData[Type]
   }
 
-  sealed trait Reference[Type] extends Product with Serializable
+  sealed trait Reference[Type] extends Product with Serializable {
+    def compile: TypedFragment[Type] = ReferenceCompiler.default.compileReference(this)
+  }
 
   object Reference {
     final case class Single[Type](data: ReferenceData[Type], read: Read[Type]) extends Reference[Type]
@@ -148,31 +137,26 @@ object datas {
     }
   }
 
-  final case class Query[A[_[_]], Queried](
-    base: QueryBase,
-    lifted: A[Reference],
-    selection: Reference[Queried],
-    filters: Chain[Filter],
-    compiler: ReferenceCompiler
-  ) {
+  final case class Query[A[_[_]], Queried](base: QueryBase, lifted: A[Reference], selection: Reference[Queried], filters: Chain[Filter]) {
 
     def where(filter: A[Reference] => Filter): Query[A, Queried] =
       copy(filters = filters.append(filter(lifted)))
 
     def compileSql: Query0[Queried] = {
       val selectFrag = fr0"select "
-      val whereFrag = Fragments.whereAnd(filters.map(_.compileSql(compiler)).toList: _*)
+      val whereFrag = Fragments.whereAnd(filters.map(_.compileSql).toList: _*)
 
-      val compiledSelection = compiler.compileReference(selection)
+      val compiledSelection = selection.compile
 
-      val frag = selectFrag ++ compiledSelection.frag ++ fr"from" ++ base.compileAsFrom(compiler) ++ whereFrag
+      val frag = selectFrag ++ compiledSelection.frag ++ fr"from" ++ base.compileAsFrom ++ whereFrag
 
       implicit val read: Read[Queried] = compiledSelection.read
       frag.query[Queried]
     }
   }
-  final case class Filter(compileSql: ReferenceCompiler => Fragment) {
-    def and(another: Filter): Filter = Filter((compileSql, another.compileSql).mapN(Fragments.and(_, _)))
+
+  final case class Filter(compileSql: Fragment) {
+    def and(another: Filter): Filter = Filter(Fragments.and(compileSql, another.compileSql))
   }
 
   trait ReferenceCompiler {
@@ -185,7 +169,7 @@ object datas {
 
   object ReferenceCompiler {
 
-    def fromColumns: ReferenceCompiler = new ReferenceCompiler {
+    val default: ReferenceCompiler = new ReferenceCompiler {
       private def compileScoped[F[_]: Applicative, Type](reference: Reference[Type]): F[TypedFragment[Type]] =
         reference match {
           case imap: Reference.Map[a, b] =>
@@ -262,7 +246,7 @@ object Demo extends IOApp {
         equal(u.id, b.userId)
       }
       .leftJoin(bookSchema) { (u, b) =>
-        equal(u.right.id, b.userId)
+        equal(u.right.id, b.id)
       }
       .select {
         case t =>
