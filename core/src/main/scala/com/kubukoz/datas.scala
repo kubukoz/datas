@@ -27,11 +27,13 @@ object datas {
       State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None), Read[Type]))
     }
 
-    def caseClassSchema[F[_[_]]: FunctorK](name: TableName, stClass: ST[F[Reference]]): Table[F] =
+    def caseClassSchema[F[_[_]]: FunctorK](name: TableName, stClass: ST[F[Reference]]): TableQuery[F] =
       stClass
         .run(Chain.empty)
         .map {
-          case (_, data) => Table(name, data, GetSymbol.initial)
+          case (_, data) =>
+            val (newGetSymbol, newSymbol) = GetSymbol.initial.next
+            TableQuery(QueryBase(name, newSymbol, Nil), data, newGetSymbol)
         }
         .value
   }
@@ -81,14 +83,6 @@ object datas {
       case head :: t =>
         val newSymbol = (head.head + 1).toChar.toString
         (newSymbol :: head :: t, newSymbol)
-    }
-  }
-
-  final case class Table[A[_[_]]: FunctorK](table: TableName, lifted: A[Reference], getSymbol: GetSymbol) {
-
-    def query: TableQuery[A] = {
-      val (newGetSymbol, newSymbol) = getSymbol.next
-      TableQuery(QueryBase(table, newSymbol, Nil), lifted, newGetSymbol)
     }
   }
 
@@ -274,10 +268,10 @@ object Demo extends IOApp {
   import schemas.caseClassSchema
   import schemas.column
 
-  val bookSchema: Table[Book] =
+  val bookSchema: TableQuery[Book] =
     caseClassSchema(TableName("books"), (column[Long]("id"), column[Long]("user_id")).mapN(Book[Reference])) //types explicit, less typing
 
-  val userSchema: Table[User] =
+  val userSchema: TableQuery[User] =
     caseClassSchema(
       TableName("users"),
       Applicative[schemas.ST]
@@ -286,7 +280,6 @@ object Demo extends IOApp {
 
   val q1 =
     userSchema
-      .query
       .select(
         u =>
           (
@@ -302,9 +295,8 @@ object Demo extends IOApp {
 
   val q2 =
     userSchema
-      .query
-      .leftJoin(bookSchema.query)((u, b) => equal(u.id, b.userId))
-      .leftJoin(bookSchema.query)((u, b) => equal(u.right.id, b.id))
+      .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
+      .leftJoin(bookSchema)((u, b) => equal(u.right.id, b.id))
       .select {
         _.asTuple.leftMap(_.asTuple) match {
           case ((user, book1), book2) => (user.age, user.name, book1.userId, book2.id, user.id).tupled
@@ -319,8 +311,7 @@ object Demo extends IOApp {
 
   val q3 =
     userSchema
-      .query
-      .leftJoin(bookSchema.query.leftJoin(bookSchema.query)((u, b) => equal(u.id, b.id)))((u, b) => equal(u.id, b.left.userId))
+      .leftJoin(bookSchema.leftJoin(bookSchema)((u, b) => equal(u.id, b.id)))((u, b) => equal(u.id, b.left.userId))
       .select {
         _.asTuple.map(_.asTuple) match {
           case (user, (book1, book2)) => (user.age, user.name, book1.userId, book2.id, user.id).tupled
