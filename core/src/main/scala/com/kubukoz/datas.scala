@@ -90,14 +90,6 @@ object datas {
       val (newGetSymbol, newSymbol) = getSymbol.next
       TableQuery(QueryBase(table, newSymbol, Nil), lifted, newGetSymbol)
     }
-
-    def leftJoin[B[_[_]]: FunctorK](
-      another: Table[B]
-    )(
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): JoinedTableQuery[A, B] =
-      query.leftJoin(another)(onClause)
-
   }
 
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
@@ -105,13 +97,13 @@ object datas {
   final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference], private val getSymbol: GetSymbol) {
 
     def leftJoin[B[_[_]]: FunctorK](
-      another: Table[B]
+      another: TableQuery[B]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): JoinedTableQuery[A, B] = join(another, "left join")(onClause)
 
     def join[B[_[_]]: FunctorK](
-      another: Table[B],
+      another: TableQuery[B],
       kind: JoinKind
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
@@ -119,9 +111,9 @@ object datas {
       val (newGetSymbol, anotherSymbol) = getSymbol.next
       TableQuery(
         base.copy(
-          joins = base.joins :+ Join(
+          joins = base.joins ++ another.base.joins :+ Join(
             kind,
-            another.table,
+            another.base.table,
             anotherSymbol,
             onClause(lifted.mapK(setScope(base.tableSymbol)), another.lifted.mapK(setScope(anotherSymbol)))
           )
@@ -310,8 +302,9 @@ object Demo extends IOApp {
 
   val q2 =
     userSchema
-      .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
-      .leftJoin(bookSchema)((u, b) => equal(u.right.id, b.id))
+      .query
+      .leftJoin(bookSchema.query)((u, b) => equal(u.id, b.userId))
+      .leftJoin(bookSchema.query)((u, b) => equal(u.right.id, b.id))
       .select {
         _.asTuple.leftMap(_.asTuple) match {
           case ((user, book1), book2) => (user.age, user.name, book1.userId, book2.id, user.id).tupled
@@ -324,6 +317,22 @@ object Demo extends IOApp {
       }
       .where(t => equal(t.right.id, Reference.lift(1L)))
 
+  val q3 =
+    userSchema
+      .query
+      .leftJoin(bookSchema.query.leftJoin(bookSchema.query)((u, b) => equal(u.id, b.id)))((u, b) => equal(u.id, b.left.userId))
+      .select {
+        _.asTuple.map(_.asTuple) match {
+          case (user, (book1, book2)) => (user.age, user.name, book1.userId, book2.id, user.id).tupled
+        }
+      }
+      .where {
+        _.asTuple match {
+          case (user, _) => equal(user.age, Reference.lift(18))
+        }
+      }
+      .where(t => equal(t.right.right.id, Reference.lift(1L)))
+
   val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
 
   def getAll[A[_[_]], Queried](q: Query[A, Queried]): IO[Unit] =
@@ -334,5 +343,5 @@ object Demo extends IOApp {
     } *> q.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain *> IO(println("\n\n"))
 
   def run(args: List[String]): IO[ExitCode] =
-    getAll(q1) *> getAll(q2).as(ExitCode.Success)
+    getAll(q1) *> getAll(q2) *> getAll(q3).as(ExitCode.Success)
 }
