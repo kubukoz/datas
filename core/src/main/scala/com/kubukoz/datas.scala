@@ -95,10 +95,12 @@ object datas {
       another: Table[B]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): TableQuery[Tuple2KK[A, B, ?[_]]] =
+    ): JoinedTableQuery[A, B] =
       query.leftJoin(another)(onClause)
 
   }
+
+  type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
   final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference], private val getSymbol: GetSymbol) {
 
@@ -106,12 +108,19 @@ object datas {
       another: Table[B]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): TableQuery[Tuple2KK[A, B, ?[_]]] = {
+    ): JoinedTableQuery[A, B] = join(another, "left join")(onClause)
+
+    def join[B[_[_]]: FunctorK](
+      another: Table[B],
+      kind: JoinKind
+    )(
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
+    ): JoinedTableQuery[A, B] = {
       val (newGetSymbol, anotherSymbol) = getSymbol.next
       TableQuery(
         base.copy(
           joins = base.joins :+ Join(
-            "left join",
+            kind,
             another.table,
             anotherSymbol,
             onClause(lifted.mapK(setScope(base.tableSymbol)), another.lifted.mapK(setScope(anotherSymbol)))
@@ -151,7 +160,7 @@ object datas {
   final case class Column(name: String) extends AnyVal
 
   sealed trait ReferenceData[Type] extends Product with Serializable {
-    def widen[B >: Type]: ReferenceData[B] = this.asInstanceOf[ReferenceData[B]] //todo I'm pretty
+    def widen[B >: Type]: ReferenceData[B] = this.asInstanceOf[ReferenceData[B]] //todo I'm pretty sure
   }
 
   object ReferenceData {
