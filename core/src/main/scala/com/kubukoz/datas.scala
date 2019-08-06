@@ -13,6 +13,8 @@ import cats.~>
 import cats.tagless.implicits._
 import cats.Apply
 import java.{util => ju}
+import shapeless.HNil
+import shapeless.{:: => HCons}
 
 object datas {
   // def schema[A]: Schema[A] = ???
@@ -152,11 +154,9 @@ object datas {
 
   object ReferenceData {
     final case class Column[A](col: datas.Column, scope: Option[String]) extends ReferenceData[A]
-    final case class Lift[Type](value: Type, into: Put[Type]) extends ReferenceData[Type]
+    final case class Lift[Type](value: Type, into: Param[Type HCons HNil]) extends ReferenceData[Type]
     final case class Raw[Type](fragment: Fragment) extends ReferenceData[Type]
   }
-
-  Reference.lift(Option(5L))
 
   sealed trait Reference[Type] extends Product with Serializable {
     def compile: TypedFragment[Type] = ReferenceCompiler.default.compileReference(this)
@@ -167,7 +167,8 @@ object datas {
     final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
     final case class Map[A, B](underlying: Reference[A], f: A => B) extends Reference[B]
 
-    def lift[Type: Put: Read](value: Type): Reference[Type] = Reference.Single[Type](ReferenceData.Lift(value, Put[Type]), Read[Type])
+    def lift[Type: Read](value: Type)(implicit param: Param[Type HCons HNil]): Reference[Type] =
+      Reference.Single[Type](ReferenceData.Lift(value, param), Read[Type])
 
     def mapData(fk: ReferenceData ~> ReferenceData): Reference ~> Reference = λ[Reference ~> Reference] {
       case Single(data, read)   => Single(fk(data), read)
@@ -247,8 +248,8 @@ object datas {
           val scopeString = scope.foldMap(_ + ".")
           TypedFragment[Type](Fragment.const(scopeString + "\"" + column.name + "\""), read).pure[F]
         case l: ReferenceData.Lift[a] =>
-          implicit val put = l.into
-          val _ = put //to make scalac happy
+          implicit val param: Param[a HCons HNil] = l.into
+          val _ = param //to make scalac happy
           TypedFragment[Type](fr"${l.value}", read).pure[F]
         case r: ReferenceData.Raw[a] =>
           TypedFragment[Type](r.fragment, read).pure[F]
@@ -302,6 +303,7 @@ object Demo extends IOApp {
           (
             u.name,
             Reference.lift(true),
+            Reference.lift(Option(5L)),
             u.age.as(false),
             equal(u.age, Reference.lift(23)),
             equal(Reference.lift(5), Reference.lift(10))
@@ -350,11 +352,8 @@ object Demo extends IOApp {
     userSchema
       .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
       .leftJoin(bookSchema) {
-        case (Tuple2KK(_, b), bP) => 
-        val a: Option[Long] = ???
-        
-        // equal(b.id.map(Option(_)), Reference.lift[Option[Long]](Some(5L)))
-          ???
+        case (Tuple2KK(_, b), bP) =>
+          equal(b.id.map(Option(_)), Reference.lift[Option[Long]](Some(5L)))
       }
       .select(_.right.id)
   }
