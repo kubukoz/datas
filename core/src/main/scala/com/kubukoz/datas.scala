@@ -12,6 +12,7 @@ import cats.tagless.FunctorK
 import cats.~>
 import cats.tagless.implicits._
 import cats.Apply
+import java.{util => ju}
 
 object datas {
   // def schema[A]: Schema[A] = ???
@@ -105,12 +106,12 @@ object datas {
       val (newGetSymbol, anotherSymbol) = getSymbol.next
       TableQuery(
         base.copy(
-          joins = base.joins ++ another.base.joins :+ Join(
+          joins = (base.joins :+ Join(
             kind,
             another.base.table,
             anotherSymbol,
             onClause(lifted.mapK(setScope(base.tableSymbol)), another.lifted.mapK(setScope(anotherSymbol)))
-          )
+          )) ++ another.base.joins
         ),
         Tuple2KK(lifted.mapK(setScope(base.tableSymbol)), another.lifted.mapK(setScope(anotherSymbol))),
         newGetSymbol
@@ -130,8 +131,8 @@ object datas {
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(
         base,
-        lifted,
-        selection(lifted),
+        lifted.pure[SymbolState],
+        selection,
         filters = Chain.empty
       )
   }
@@ -154,6 +155,8 @@ object datas {
     final case class Lift[Type](value: Type, into: Put[Type]) extends ReferenceData[Type]
     final case class Raw[Type](fragment: Fragment) extends ReferenceData[Type]
   }
+
+  Reference.lift(Option(5L))
 
   sealed trait Reference[Type] extends Product with Serializable {
     def compile: TypedFragment[Type] = ReferenceCompiler.default.compileReference(this)
@@ -179,27 +182,39 @@ object datas {
     }
   }
 
+  final case class TableSymbol(value: String) extends AnyVal
+
+  type SymbolState[A] = State[Int, A]
+
+  object SymbolState {
+    val next: SymbolState[TableSymbol] = State.get[Int].map("x" + _).map(TableSymbol(_)) <* State.modify[Int](_ + 1)
+  }
+
   final case class Query[A[_[_]], Queried](
     base: QueryBase,
-    lifted: A[Reference],
-    selection: Reference[Queried],
-    filters: Chain[Reference[Boolean]]
+    lifted: SymbolState[A[Reference]],
+    selection: A[Reference] => Reference[Queried],
+    filters: Chain[A[Reference] => Reference[Boolean]]
   ) {
 
     def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
-      copy(filters = filters.append(filter(lifted)))
+      copy(filters = filters.append(filter))
 
-    def compileSql: Query0[Queried] = {
-      val compiledSelection = selection.compile
+    def compileSql: Query0[Queried] =
+      lifted
+        .map { lifted =>
+          val compiledSelection = selection(lifted).compile
 
-      implicit val read: Read[Queried] = compiledSelection.read
+          implicit val read: Read[Queried] = compiledSelection.read
 
-      val frag = fr"select" ++ compiledSelection.frag ++
-        fr"from" ++ base.compileAsFrom ++
-        Fragments.whereAnd(filters.map(_.compile.frag).toList: _*)
+          val frag = fr"select" ++ compiledSelection.frag ++
+            fr"from" ++ base.compileAsFrom ++
+            Fragments.whereAnd(filters.map(_.apply(lifted).compile.frag).toList: _*)
 
-      frag.query[Queried]
-    }
+          frag.query[Queried]
+        }
+        .runA(0)
+        .value
   }
 
   trait ReferenceCompiler {
@@ -230,7 +245,6 @@ object datas {
       private def compileData[F[_]: Applicative, Type](read: Read[Type]): ReferenceData[Type] => F[TypedFragment[Type]] = {
         case ReferenceData.Column(column, scope) =>
           val scopeString = scope.foldMap(_ + ".")
-          /* scopedFrag[F]("\"" + column.name + "\"").map(Fragment.const(_)).map(TypedFragment[Type](_, read)) */
           TypedFragment[Type](Fragment.const(scopeString + "\"" + column.name + "\""), read).pure[F]
         case l: ReferenceData.Lift[a] =>
           implicit val put = l.into
@@ -254,11 +268,11 @@ object User {
   }
 }
 
-final case class Book[F[_]](id: F[Long], userId: F[Long])
+final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]])
 
 object Book {
   implicit val functorK: FunctorK[Book] = new FunctorK[Book] {
-    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] = Book(fk(af.id), fk(af.userId))
+    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] = Book(fk(af.id), fk(af.userId), fk(af.parentId))
   }
 }
 
@@ -269,7 +283,10 @@ object Demo extends IOApp {
   import schemas.column
 
   val bookSchema: TableQuery[Book] =
-    caseClassSchema(TableName("books"), (column[Long]("id"), column[Long]("user_id")).mapN(Book[Reference])) //types explicit, less typing
+    caseClassSchema(
+      TableName("books"),
+      (column[Long]("id"), column[Long]("user_id"), column[Option[Long]]("parent_id")).mapN(Book[Reference])
+    ) //types explicit, less typing
 
   val userSchema: TableQuery[User] =
     caseClassSchema(
@@ -293,10 +310,13 @@ object Demo extends IOApp {
       .where(u => over(u.age, Reference.lift(18)))
       .where(u => nonEqual(u.name, Reference.lift("John")))
 
+  val qq2: TableQuery[Tuple2KK[Tuple2KK[User, Book, ?[_]], Book, ?[_]]] =
+    userSchema.leftJoin(bookSchema)((u, b) => equal(u.id, b.userId)).leftJoin(bookSchema)((u, b) => equal(u.left.id, b.id))
+
   val q2 =
     userSchema
       .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
-      .leftJoin(bookSchema)((u, b) => equal(u.right.id, b.id))
+      .leftJoin(bookSchema)((u, b) => equal(u.left.id, b.id))
       .select {
         _.asTuple.leftMap(_.asTuple) match {
           case ((user, book1), book2) => (user.age, user.name, book1.userId, book2.id, user.id).tupled
@@ -324,6 +344,21 @@ object Demo extends IOApp {
       }
       .where(t => equal(t.right.right.id, Reference.lift(1L)))
 
+  println(q3.compileSql)
+
+  val a = {
+    userSchema
+      .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
+      .leftJoin(bookSchema) {
+        case (Tuple2KK(_, b), bP) => 
+        val a: Option[Long] = ???
+        
+        // equal(b.id.map(Option(_)), Reference.lift[Option[Long]](Some(5L)))
+          ???
+      }
+      .select(_.right.id)
+  }
+
   val xa = Transactor.fromDriverManager[IO]("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres", "postgres", "postgres")
 
   def getAll[A[_[_]], Queried](q: Query[A, Queried]): IO[Unit] =
@@ -334,5 +369,5 @@ object Demo extends IOApp {
     } *> q.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain *> IO(println("\n\n"))
 
   def run(args: List[String]): IO[ExitCode] =
-    getAll(q1) *> getAll(q2) *> getAll(q3).as(ExitCode.Success)
+    getAll(q1) *> getAll(q2) *> getAll(a) *> (if (false) getAll(q3) else IO.unit).as(ExitCode.Success)
 }
