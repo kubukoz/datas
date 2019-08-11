@@ -1,5 +1,3 @@
-package com.kubukoz
-
 import cats.effect._
 import cats.implicits._
 import doobie.util.fragment.Fragment
@@ -371,22 +369,6 @@ object Demo extends IOApp {
         ) //types automatically inferred
     )
 
-  val q1 =
-    userSchema
-      .select(
-        u =>
-          (
-            u.name,
-            Reference.lift(true),
-            Reference.lift(Option(5L)),
-            u.age.as(false),
-            equal(u.age, Reference.lift(23)),
-            equal(Reference.lift(5), Reference.lift(10))
-          ).tupled
-      )
-      .where(u => over(u.age, Reference.lift(18)))
-      .where(u => nonEqual(u.name, Reference.lift("John")))
-
   val qq2: TableQuery[Tuple2KK[Tuple2KK[User, Book, ?[_]], Book, ?[_]]] =
     userSchema
       .leftJoin(bookSchema)((u, b) => equal(u.id, b.userId))
@@ -457,6 +439,5 @@ object Demo extends IOApp {
       .drain *> IO(println("\n\n"))
 
   def run(args: List[String]): IO[ExitCode] =
-    getAll(q1) *> getAll(q2) *> getAll(a) *> (if (false) getAll(q3)
-                                              else IO.unit).as(ExitCode.Success)
+    getAll(q2) *> getAll(a) *> (if (false) getAll(q3) else IO.unit).as(ExitCode.Success)
 }
