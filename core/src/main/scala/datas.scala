@@ -146,6 +146,9 @@ object datas {
   def equal[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
     binary(_ ++ fr"=" ++ _)
 
+  def equalOptionL[Type]: (Reference[Option[Type]], Reference[Type]) => Reference[Boolean] =
+    binary(_ ++ fr"=" ++ _)
+
   def notNull[Type]: Reference[Option[Type]] => Reference[Boolean] =
     a =>
       Reference.Single(
@@ -156,7 +159,7 @@ object datas {
   def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
     binary(_ ++ fr"<>" ++ _)
 
-  def binary[Type](f: (Fragment, Fragment) => Fragment)(l: Reference[Type], r: Reference[Type]): Reference[Boolean] =
+  def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
     Reference.Single(
       ReferenceData.Raw(f(l.compile.frag, r.compile.frag)),
       Read[Boolean]

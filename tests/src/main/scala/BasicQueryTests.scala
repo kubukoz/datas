@@ -8,6 +8,7 @@ import cats.~>
 import fs2.Pipe
 import cats.kernel.Eq
 import cats.Show
+import flawless.stats.Location
 
 object BasicJoinQueryTests {
 
@@ -95,7 +96,7 @@ object BasicJoinQueryTests {
   )
 
   def singleJoinTests(implicit xa: Transactor[IO]) = tests(
-    test("left join users and books") {
+    test("inner join users and books") {
       val q = userSchema
         .innerJoin(bookSchema) { (u, b) =>
           equal(u.id, b.userId)
@@ -110,6 +111,41 @@ object BasicJoinQueryTests {
         ("Jakub", 1L),
         ("John", 2L)
       )
+    },
+    test("(a join b) join c)") {
+      val q = userSchema
+        .innerJoin(bookSchema) { (u, b) =>
+          equal(u.id, b.userId)
+        }
+        .innerJoin(bookSchema) { (t, b) =>
+          equal(t.right.parentId, b.id.map(_.some))
+        }
+        .select {
+          _.asTuple.leftMap(_.asTuple) match {
+            case ((user, book), bookParent) => (user.name, book.id, bookParent.id).tupled
+          }
+        }
+
+      expectAllToBe(q)(
+        ("John", 2L, 1L)
+      )
+    },
+    test("a join (b join c)") {
+      val q = userSchema
+        .innerJoin(bookSchema.innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }) { (u, t) =>
+          equal(u.id, t.left.userId)
+        }
+        .select {
+          _.asTuple.map(_.asTuple) match {
+            case (user, (book, bookParent)) => (user.name, book.id, bookParent.id).tupled
+          }
+        }
+
+      expectAllToBe(q)(
+        ("John", 2L, 1L)
+      )
     }
   )
 
@@ -121,11 +157,25 @@ object BasicJoinQueryTests {
     first: Queried,
     rest: Queried*
   )(
-    implicit xa: Transactor[IO]
-  ): IO[Assertions] =
+    implicit xa: Transactor[IO],
+    file: sourcecode.File,
+    line: sourcecode.Line
+  ): IO[Assertions] = {
+    val expectedList = first :: rest.toList
+
     q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
-      _.leftMap(_.getMessage) shouldBe Right(first :: rest.toList)
+      case Left(exception) =>
+        Assertions(
+          Assertion.Failed(
+            AssertionFailure(
+              show"An exception occured, but $expectedList was expected. Exception message: ${exception.getMessage}",
+              Location(file.value, line.value)
+            )
+          )
+        )
+      case Right(values) => values shouldBe expectedList
     }
+  }
 
   import datas.schemas._
 
