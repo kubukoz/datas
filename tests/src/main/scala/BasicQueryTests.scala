@@ -95,9 +95,9 @@ object BasicJoinQueryTests {
   )
 
   def singleJoinTests(implicit xa: Transactor[IO]) = tests(
-    test("join users and books") {
+    test("left join users and books") {
       val q = userSchema
-        .leftJoin(bookSchema) { (u, b) =>
+        .innerJoin(bookSchema) { (u, b) =>
           equal(u.id, b.userId)
         }
         .select {
@@ -107,7 +107,6 @@ object BasicJoinQueryTests {
         }
 
       expectAllToBe(q)(
-        ("Jon", 0),
         ("Jakub", 1L),
         ("John", 2L)
       )
