@@ -10,7 +10,6 @@ import cats.tagless.FunctorK
 import cats.~>
 import cats.tagless.implicits._
 import cats.Apply
-import java.{util => ju}
 import shapeless.HNil
 import shapeless.{:: => HCons}
 

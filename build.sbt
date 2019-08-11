@@ -24,7 +24,6 @@ val compilerPlugins = List(
 val commonSettings = Seq(
   scalaVersion := "2.12.8",
   scalacOptions ++= Options.all,
-  fork in Test := true,
   name := "datas",
   updateOptions := updateOptions.value.withGigahorse(false), //may fix publishing bug
   libraryDependencies ++= Seq(
@@ -33,12 +32,21 @@ val commonSettings = Seq(
     "org.tpolecat" %% "doobie-hikari" % "0.7.0",
     "org.typelevel" %% "cats-effect" % "1.4.0",
     "org.typelevel" %% "cats-tagless-macros" % "0.5",
-    "org.typelevel" %% "cats-mtl-core" % "0.6.0",
-    "com.kubukoz" %% "flawless-core" % "0.1.0-M1" % Test
+    "org.typelevel" %% "cats-mtl-core" % "0.6.0"
   ) ++ compilerPlugins
 )
 
 val core =
   project.in(file("core")).settings(commonSettings).settings(name += "-core")
+
+val tests = project
+  .settings(commonSettings)
+  .settings(
+    fork := true,
+    libraryDependencies ++= Seq(
+      "com.kubukoz" %% "flawless-core" % "0.1.0-M1"
+    )
+  )
+  .dependsOn(core)
 
 val datas = project.in(file(".")).settings(commonSettings).settings(skip in publish := true).dependsOn(core).aggregate(core)

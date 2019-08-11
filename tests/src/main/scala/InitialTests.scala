@@ -47,7 +47,7 @@ object InitialTests extends IOApp {
   private def runMigrations(fileName: String)(xa: Transactor[IO])(implicit blocker: Blocker): IO[Unit] = {
     val load = fs2
       .io
-      .readInputStream[IO](IO(getClass.getClassLoader().getResourceAsStream(fileName)), 4096, blocker.blockingContext)
+      .readInputStream[IO](IO(getClass.getClassLoader.getResourceAsStream(fileName)), 4096, blocker.blockingContext)
       .through(fs2.text.utf8Decode[IO])
       .compile
       .foldMonoid
