@@ -20,7 +20,7 @@ object BasicJoinQueryTests {
   import datas._
 
   def runSuite(implicit xa: Transactor[IO]): Tests[SuiteResult] =
-    singleTableTests |+| singleJoinTests
+    singleTableTests |+| innerJoinTests
 
   def singleTableTests(implicit xa: Transactor[IO]) = tests(
     test("basic query from single table") {
@@ -95,7 +95,7 @@ object BasicJoinQueryTests {
     }
   )
 
-  def singleJoinTests(implicit xa: Transactor[IO]) = tests(
+  def innerJoinTests(implicit xa: Transactor[IO]) = tests(
     test("inner join users and books") {
       val q = userSchema
         .innerJoin(bookSchema) { (u, b) =>
@@ -168,7 +168,9 @@ object BasicJoinQueryTests {
         Assertions(
           Assertion.Failed(
             AssertionFailure(
-              show"An exception occured, but $expectedList was expected. Exception message: ${exception.getMessage}",
+              show"""An exception occured, but $expectedList was expected.
+              |Relevant query: ${q.toString}
+              |Exception message: ${exception.getMessage}""".stripMargin,
               Location(file.value, line.value)
             )
           )

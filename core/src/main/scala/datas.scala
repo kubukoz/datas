@@ -12,10 +12,10 @@ import cats.tagless.implicits._
 import cats.Apply
 import shapeless.HNil
 import shapeless.{:: => HCons}
+import datas.QueryBase.FromTable
+import datas.QueryBase.Join
 
 object datas {
-  // def schema[A]: Schema[A] = ???
-
   type ColumnList = List[Column]
 
   object schemas {
@@ -32,8 +32,7 @@ object datas {
         .run(Chain.empty)
         .map {
           case (_, data) =>
-            val (newGetSymbol, newSymbol) = GetSymbol.initial.next
-            TableQuery(QueryBase(name, newSymbol, Nil), data, newGetSymbol)
+            TableQuery(QueryBase.FromTable(name), data)
         }
         .value
   }
@@ -44,21 +43,49 @@ object datas {
     def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
   }
 
-  final case class QueryBase(table: TableName, tableSymbol: String, joins: List[Join]) {
+  sealed trait QueryBase extends Product with Serializable {
 
-    private def compileJoinAsFrom(join: Join): Fragment =
-      Fragment.const(join.kind) ++
-        join.withTable.identifierFragment ++
-        Fragment.const(" " + join.withTableSymbol) ++
-        fr"on" ++
-        join.onClause.compile.frag
+    def joinWith[A[_[_]], B[_[_]]](
+      another: QueryBase,
+      kind: JoinKind,
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean],
+      ll: A[Reference],
+      rr: B[Reference]
+    ): QueryBase = QueryBase.Join(this, another, kind, onClause, ll, rr)
 
     def compileAsFrom: Fragment =
-      table.identifierFragment ++ Fragment.const(" " + tableSymbol) ++ joins.foldMap(compileJoinAsFrom)
+      this match {
+        case FromTable(table) => table.identifierFragment
+        case Join(left, right, kind, onClause, ll, rr) =>
+          left.compileAsFrom ++
+            Fragment.const(kind) ++
+            right.compileAsFrom ++
+            fr"on" ++
+            onClause(ll, rr).compile.frag
+      }
+  }
+
+  object QueryBase {
+    final case class FromTable(table: TableName) extends QueryBase
+    final case class Join[A[_[_]], B[_[_]]](
+      left: QueryBase,
+      right: QueryBase,
+      kind: JoinKind,
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean],
+      leftLifted: A[Reference],
+      rightLifted: B[Reference]
+    ) extends QueryBase
   }
 
   type JoinKind = String
-  final case class Join(kind: JoinKind, withTable: TableName, withTableSymbol: String, onClause: Reference[Boolean])
+
+  // final case class Join(kind: JoinKind, withTable: TableName, withTableSymbol: String, onClause: Reference[Boolean]) {
+  /* Fragment.const(join.kind) ++
+        join.withTable.identifierFragment ++
+        Fragment.const(" " + join.withTableSymbol) ++
+        fr"on" ++
+        join.onClause.compile.frag */
+  // }
 
   final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
     def asTuple: (A[F], B[F]) = (left, right)
@@ -90,7 +117,7 @@ object datas {
 
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
-  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference], private val getSymbol: GetSymbol) {
+  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference]) {
 
     def innerJoin[B[_[_]]: FunctorK](
       another: TableQuery[B]
@@ -103,28 +130,15 @@ object datas {
       kind: JoinKind
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): JoinedTableQuery[A, B] = {
-      val (newGetSymbol, anotherSymbol) = getSymbol.next
+    ): JoinedTableQuery[A, B] =
       TableQuery(
-        base.copy(
-          joins = (base.joins :+ Join(
-            kind,
-            another.base.table,
-            anotherSymbol,
-            onClause(
-              lifted.mapK(setScope(base.tableSymbol)),
-              another.lifted.mapK(setScope(anotherSymbol))
-            )
-          )) ++ another.base.joins
-        ),
+        base.joinWith(another.base, kind, onClause, lifted, another.lifted),
         Tuple2KK(
-          lifted.mapK(setScope(base.tableSymbol)),
-          another.lifted.mapK(setScope(anotherSymbol))
-        ),
-        newGetSymbol
+          lifted,
+          another.lifted
+        )
       )
-    }
-
+    /*
     private def setScope(scope: String) = Reference.mapData {
       λ[ReferenceData ~> ReferenceData] {
         case ReferenceData.Column(n, None) =>
@@ -134,7 +148,7 @@ object datas {
           c
         case c => c
       }
-    }
+    } */
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(base, lifted.pure[SymbolState], selection, filters = Chain.empty)
@@ -170,7 +184,7 @@ object datas {
   sealed trait ReferenceData[Type] extends Product with Serializable {
 
     def widen[B >: Type]: ReferenceData[B] =
-      this.asInstanceOf[ReferenceData[B]] //todo I'm pretty sure
+      this.asInstanceOf[ReferenceData[B]] //todo I'm pretty sure it won't work for some cases
   }
 
   object ReferenceData {
