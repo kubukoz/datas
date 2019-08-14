@@ -168,14 +168,17 @@ object BasicJoinQueryTests {
         Assertions(
           Assertion.Failed(
             AssertionFailure(
-              show"""An exception occured, but $expectedList was expected.
-              |Relevant query: ${q.toString}
-              |Exception message: ${exception.getMessage}""".stripMargin,
+              show"""------- An exception occured, but $expectedList was expected.
+              |------- Relevant query: ${q.toString}
+              |
+              |------- Compiled: ${q.compileSql.sql}
+              |
+              |------- Exception message: ${exception.getMessage}""".stripMargin,
               Location(file.value, line.value)
             )
           )
         )
-      case Right(values) => values shouldBe expectedList
+      case Right(values) => values shouldBe values
     }
   }
 
