@@ -26,6 +26,7 @@ jobs:
   include:
   # stage="test" if no stage is specified
   - script:
+    - psql -c 'create database postgres' -U postgres
     - sbt tests/run
   # run ci-release only if previous stages passed
   #  - stage: release
