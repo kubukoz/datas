@@ -2,7 +2,7 @@ language: scala
 scala:
   - 2.12.8
 services:
-  - postgres
+  - postgresql
 cache:
   directories:
     - $HOME/.sbt/1.0/dependency
