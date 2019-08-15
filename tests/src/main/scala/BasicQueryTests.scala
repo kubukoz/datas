@@ -10,7 +10,7 @@ import cats.kernel.Eq
 import cats.Show
 import flawless.stats.Location
 
-object BasicJoinQueryTests {
+final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
   implicit def showTuple3[A: Show, B: Show, C: Show]: Show[(A, B, C)] = {
     case (a, b, c) => show"($a, $b, $c)"
@@ -19,10 +19,10 @@ object BasicJoinQueryTests {
   import flawless.syntax._
   import datas._
 
-  def runSuite(implicit xa: Transactor[IO]): Tests[SuiteResult] =
-    singleTableTests// |+| innerJoinTests
+  def run: Tests[SuiteResult] =
+    singleTableTests |+| innerJoinTests
 
-  def singleTableTests(implicit xa: Transactor[IO]) = tests(
+  def singleTableTests = tests(
     test("basic query from single table") {
 
       val q =
@@ -95,7 +95,7 @@ object BasicJoinQueryTests {
     }
   )
 
-  def innerJoinTests(implicit xa: Transactor[IO]) = tests(
+  def innerJoinTests = tests(
     test("inner join users and books") {
       val q = userSchema
         .innerJoin(bookSchema) { (u, b) =>
@@ -168,12 +168,10 @@ object BasicJoinQueryTests {
         Assertions(
           Assertion.Failed(
             AssertionFailure(
-              show"""------- An exception occured, but $expectedList was expected.
-              |------- Relevant query: ${q.toString}
-              |
-              |------- Compiled: ${q.compileSql.sql}
-              |
-              |------- Exception message: ${exception.getMessage}""".stripMargin,
+              show"""An exception occured, but $expectedList was expected.
+              |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
+              |Compiled: ${q.compileSql.sql}
+              |Exception message: ${exception.getMessage}""".stripMargin,
               Location(file.value, line.value)
             )
           )
