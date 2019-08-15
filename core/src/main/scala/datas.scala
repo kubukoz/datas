@@ -13,6 +13,7 @@ import shapeless.HNil
 import shapeless.{:: => HCons}
 import datas.QueryBase.FromTable
 import datas.QueryBase.Join
+import cats.effect.concurrent.Ref
 
 object datas {
   type ColumnList = List[Column]
@@ -95,26 +96,36 @@ object datas {
     ): JoinedTableQuery[A, B] =
       TableQuery(
         QueryBase
-          .Join(base, another.base, kind, onClause, i => lifted.mapK(setScope("x" + i)), i => another.lifted.mapK(setScope("x" + i))),
+          .Join(base, another.base, kind, new OnClause[A, B](onClause, lifted, another.lifted), Scoped(lifted), Scoped(another.lifted)),
         Tuple2KK(
           lifted,
           another.lifted
         )
       )
 
-    private def setScope(scope: String) = Reference.mapData {
-      λ[ReferenceData ~> ReferenceData] {
-        case ReferenceData.Column(n, None) =>
-          ReferenceData.Column(n, Some(scope))
-        case c @ ReferenceData.Column(_, Some(_)) =>
-          println("ignoring already defined scope! " + c + ", " + scope)
-          c
-        case c => c
-      }
-    }
-
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
-      Query(base, lifted, selection, filters = Chain.empty)
+      Query(base, lifted, /* selection, */ filters = Chain.empty)
+  }
+
+  final class OnClause[A[_[_]], B[_[_]]](f: (A[Reference], B[Reference]) => Reference[Boolean], a: A[Reference], b: B[Reference])
+    extends ((A[Reference], B[Reference]) => Reference[Boolean]) {
+    def apply(a: A[Reference], b: B[Reference]): Reference[Boolean] = f(a, b)
+    override def toString(): String = s"OnClause(previewUnscoped = ${apply(a, b)})"
+  }
+
+  final case class Scoped[A[_[_]]: FunctorK](lifted: A[Reference]) extends (Int => A[Reference]) {
+    def apply(index: Int): A[Reference] = lifted.mapK(setScope("x" + index))
+  }
+
+  private def setScope(scope: String) = Reference.mapData {
+    λ[ReferenceData ~> ReferenceData] {
+      case ReferenceData.Column(n, None) =>
+        ReferenceData.Column(n, Some(scope))
+      case c @ ReferenceData.Column(_, Some(_)) =>
+        println("ignoring already defined scope! " + c + ", " + scope)
+        c
+      case c => c
+    }
   }
 
   final case class Column(name: String) extends AnyVal
@@ -166,7 +177,7 @@ object datas {
   final case class Query[A[_[_]], Queried](
     base: QueryBase,
     lifted: A[Reference],
-    selection: A[Reference] => Reference[Queried],
+    // selection: A[Reference] => Reference[Queried],
     filters: Chain[A[Reference] => Reference[Boolean]]
   ) {
 
