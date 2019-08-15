@@ -11,9 +11,6 @@ import cats.tagless.implicits._
 import cats.Apply
 import shapeless.HNil
 import shapeless.{:: => HCons}
-import datas.QueryBase.FromTable
-import datas.QueryBase.Join
-import cats.effect.concurrent.Ref
 import cats.data.NonEmptyList
 
 object datas {
@@ -33,7 +30,7 @@ object datas {
         .run(Chain.empty)
         .map {
           case (_, data) =>
-            TableQuery(QueryBase.FromTable(name), data)
+            TableQuery(QueryBase.FromTable(name, data, FunctorK[F]))
         }
         .value
   }
@@ -42,36 +39,10 @@ object datas {
     def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
   }
 
-  sealed trait QueryBase extends Product with Serializable {
+  sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
-    /**
-      * Returns: identifiers involved in this query
-      * (one when it's a single FromTable node, multiple if it's a join),
-      * and a list of compiled join clauses (empty wehn it's a single FromTable node).
-      */
-    private def doCompile(qbase: QueryBase, currentIndex: Int): (NonEmptyList[Fragment], List[(JoinKind, Fragment)]) =
-      qbase match {
-        case FromTable(table) => (NonEmptyList.one(table.identifierFragment ++ Fragment.const("x" + currentIndex)), Nil)
-        case Join(left, right, kind, onClause, compileLeftLifted, compileRightLifted) =>
-          val indexBeforeLeft = currentIndex
-          val leftClauseArgCompiled = compileLeftLifted(indexBeforeLeft)
-          val (leftIdentifier, leftClauses) = doCompile(left, indexBeforeLeft)
-
-          val indexBeforeRight = indexBeforeLeft + leftIdentifier.size
-          val rightClauseArgCompiled = compileRightLifted(indexBeforeRight)
-          val (rightIdentifier, rightClauses) = doCompile(right, indexBeforeRight)
-
-          val allIdentifiers = leftIdentifier <+> rightIdentifier
-
-          val thisJoinClause = onClause(leftClauseArgCompiled, rightClauseArgCompiled).compile.frag
-          val allClauses = leftClauses <+> List((kind, thisJoinClause)) <+> rightClauses
-
-          (allIdentifiers, allClauses)
-      }
-
-    def compileAsFrom: Fragment = {
-      val (identifiers, joinClauses) =
-        doCompile(this, 0)
+    def compileAsFrom: (Fragment, A[Reference]) = {
+      val (identifiers, joinClauses, compiledLifted) = QueryBase.doCompile(this, 0)
       val firstIdent = identifiers.head
 
       val compiledJoin = (identifiers.tail, joinClauses).parMapN {
@@ -79,27 +50,59 @@ object datas {
           Fragment.const(kind) ++ ident ++ fr"on" ++ clause
       }.combineAll
 
-      firstIdent ++ compiledJoin
+      (firstIdent ++ compiledJoin, compiledLifted)
     }
   }
 
   object QueryBase {
-    final case class FromTable(table: TableName) extends QueryBase
+    final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], functorK: FunctorK[A]) extends QueryBase[A]
     final case class Join[A[_[_]], B[_[_]]](
-      left: QueryBase,
-      right: QueryBase,
+      left: QueryBase[A],
+      right: QueryBase[B],
       kind: JoinKind,
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean],
-      leftLifted: Int => A[Reference],
-      rightLifted: Int => B[Reference]
-    ) extends QueryBase
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
+    ) extends QueryBase[Tuple2KK[A, B, *[_]]]
+
+    /**
+      * Returns: identifiers involved in this query
+      * (one when it's a single FromTable node, multiple if it's a join),
+      * and a list of compiled join clauses (empty wehn it's a single FromTable node).
+      * Also, the A of scoped references.
+      */
+    def doCompile[A[_[_]]](qbase: QueryBase[A], currentIndex: Int): (NonEmptyList[Fragment], List[(JoinKind, Fragment)], A[Reference]) =
+      qbase match {
+        case t: FromTable[t] =>
+          implicit val functorK = t.functorK
+          (
+            NonEmptyList.one(t.table.identifierFragment ++ Fragment.const("x" + currentIndex)),
+            Nil,
+            t.lifted.mapK(setScope("x" + currentIndex))
+          )
+        case j: Join[a, b] =>
+          import j._
+          val indexBeforeLeft = currentIndex
+
+          val (leftIdentifier, leftClauses, leftClauseArgCompiled) = doCompile(left, indexBeforeLeft)
+
+          val indexBeforeRight = indexBeforeLeft + leftIdentifier.size
+          val (rightIdentifier, rightClauses, rightClauseArgCompiled) = doCompile(right, indexBeforeRight)
+
+          val allIdentifiers = leftIdentifier <+> rightIdentifier
+
+          val thisJoinClause = onClause(leftClauseArgCompiled, rightClauseArgCompiled).compile.frag
+          val allClauses = leftClauses <+> List((kind, thisJoinClause)) <+> rightClauses
+
+          (allIdentifiers, allClauses, Tuple2KK(leftClauseArgCompiled, rightClauseArgCompiled))
+      }
+
   }
 
   type JoinKind = String
 
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
-  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference]) {
+  //todo this class is redundant, should be merged with querybase next
+  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase[A]) {
 
     def innerJoin[B[_[_]]: FunctorK](
       another: TableQuery[B]
@@ -114,29 +117,11 @@ object datas {
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): JoinedTableQuery[A, B] =
       TableQuery(
-        QueryBase
-          .Join(base, another.base, kind, new OnClause[A, B](onClause, lifted, another.lifted), Scoped(lifted), Scoped(another.lifted)),
-        Tuple2KK(
-          lifted,
-          another.lifted
-        )
+        QueryBase.Join(base, another.base, kind, onClause)
       )
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
-      Query(base, lifted, /* selection, */ filters = Chain.empty)
-  }
-
-  final class OnClause[A[_[_]]: FunctorK, B[_[_]]: FunctorK](
-    f: (A[Reference], B[Reference]) => Reference[Boolean],
-    a: A[Reference],
-    b: B[Reference]
-  ) extends ((A[Reference], B[Reference]) => Reference[Boolean]) {
-    def apply(a: A[Reference], b: B[Reference]): Reference[Boolean] = f(a, b)
-    override def toString(): String = s"OnClause(preview = ${apply(a.mapK(setScope("a")), b.mapK(setScope("b")))})"
-  }
-
-  final case class Scoped[A[_[_]]: FunctorK](lifted: A[Reference]) extends (Int => A[Reference]) {
-    def apply(index: Int): A[Reference] = lifted.mapK(setScope("x" + index))
+      Query(base, selection, filters = Chain.empty)
   }
 
   private def setScope(scope: String) = Reference.mapData {
@@ -197,30 +182,28 @@ object datas {
   }
 
   final case class Query[A[_[_]], Queried](
-    base: QueryBase,
-    lifted: A[Reference],
-    // selection: A[Reference] => Reference[Queried],
+    base: QueryBase[A],
+    selection: A[Reference] => Reference[Queried],
     filters: Chain[A[Reference] => Reference[Boolean]]
   ) {
 
     def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
       copy(filters = filters.append(filter))
 
-    def compileSql: Query0[Int] = {
-      val compiledSelection = fr"1" //selection(lifted).compile
+    def compileSql: Query0[Queried] = {
+      val (compiledFrom, compiledReference) = base.compileAsFrom
 
-      // implicit val read: Read[Queried] = compiledSelection.read
+      val compiledSelection = selection(compiledReference).compile
 
-      val frag = fr"select" ++ compiledSelection /* .frag */ ++
-        fr"from" ++ base.compileAsFrom ++
+      implicit val read: Read[Queried] = compiledSelection.read
+
+      val frag = fr"select" ++ compiledSelection.frag ++
+        fr"from" ++ compiledFrom ++
         Fragments.whereAnd(
-          /* filters.map(_.apply(lifted).compile.frag).toList: _* */
-          fr"true"
+          filters.map(_.apply(compiledReference).compile.frag).toList: _*
         )
 
-      // frag.query[Queried]
-      frag.query[Int]
-
+      frag.query[Queried]
     }
   }
 

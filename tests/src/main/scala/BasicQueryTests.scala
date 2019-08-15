@@ -163,7 +163,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   ): IO[Assertions] = {
     val expectedList = first :: rest.toList
 
-    q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
+    IO(println(show"Testing query: ${q.compileSql.sql}")) *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
         Assertions(
           Assertion.Failed(
