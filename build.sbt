@@ -1,6 +1,5 @@
 inThisBuild(
   List(
-    resolvers += "Sonatype OSS Snapshots" at "https://oss.sonatype.org/content/repositories/snapshots",
     organization := "com.kubukoz",
     homepage := Some(url("https://github.com/kubukoz/datas")),
     licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
