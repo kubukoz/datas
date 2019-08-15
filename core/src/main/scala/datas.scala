@@ -36,8 +36,6 @@ object datas {
         }
         .value
   }
-  //todo derivation
-  //todo make sure schema must have a table
 
   final case class TableName(name: String) extends AnyVal {
     def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
