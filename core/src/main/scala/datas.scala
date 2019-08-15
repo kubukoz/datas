@@ -1,4 +1,3 @@
-import cats.effect._
 import cats.implicits._
 import doobie.util.fragment.Fragment
 import doobie._
