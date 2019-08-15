@@ -20,7 +20,7 @@ object BasicJoinQueryTests {
   import datas._
 
   def runSuite(implicit xa: Transactor[IO]): Tests[SuiteResult] =
-    singleTableTests |+| innerJoinTests
+    singleTableTests// |+| innerJoinTests
 
   def singleTableTests(implicit xa: Transactor[IO]) = tests(
     test("basic query from single table") {

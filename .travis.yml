@@ -1,8 +1,8 @@
 language: scala
 scala:
 - 2.12.8
-jdk:
-- openjdk8
+services:
+- postgres
 cache:
   directories:
     - $HOME/.sbt/1.0/dependency
