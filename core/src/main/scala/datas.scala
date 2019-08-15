@@ -14,7 +14,6 @@ import shapeless.HNil
 import shapeless.{:: => HCons}
 import datas.QueryBase.FromTable
 import datas.QueryBase.Join
-import simulacrum.typeclass
 
 object datas {
   type ColumnList = List[Column]
@@ -45,14 +44,6 @@ object datas {
   }
 
   sealed trait QueryBase extends Product with Serializable {
-
-    def joinWith[A[_[_]], B[_[_]]](
-      another: QueryBase,
-      kind: JoinKind,
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean],
-      ll: Int => A[Reference],
-      rr: Int => B[Reference]
-    ): QueryBase = QueryBase.Join(this, another, kind, onClause, ll, rr)
 
     private def doCompile(qbase: QueryBase, currentIndex: Int): (Fragment, Int) =
       qbase match {
@@ -91,21 +82,6 @@ object datas {
 
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
-  trait VisitorK[A[_[_]]] {
-    def visitK[F[_]](af: A[F])(f: F ~> F): A[F]
-  }
-
-  object VisitorK {
-    implicit class Syntax[A[_[_]], F[_]](private val self: A[F]) extends AnyVal {
-      def visitK(f: F ~> F)(implicit V: VisitorK[A]): A[F] = V.visitK(self)(f)
-    }
-
-    implicit def traverserKTuple2KK[A[_[_]]: VisitorK, B[_[_]]: VisitorK]: VisitorK[Tuple2KK[A, B, ?[_]]] =
-      new VisitorK[Tuple2KK[A, B, ?[_]]] {
-        def visitK[F[_]](af: Tuple2KK[A, B, F])(f: F ~> F): Tuple2KK[A, B, F] = Tuple2KK(af.left.visitK(f), af.right.visitK(f andThen f))
-      }
-  }
-
   final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference]) {
 
     def innerJoin[B[_[_]]: FunctorK](
@@ -121,7 +97,8 @@ object datas {
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): JoinedTableQuery[A, B] =
       TableQuery(
-        base.joinWith(another.base, kind, onClause, i => lifted.mapK(setScope("x" + i)), i => another.lifted.mapK(setScope("x" + i))),
+        QueryBase
+          .Join(base, another.base, kind, onClause, i => lifted.mapK(setScope("x" + i)), i => another.lifted.mapK(setScope("x" + i))),
         Tuple2KK(
           lifted,
           another.lifted
