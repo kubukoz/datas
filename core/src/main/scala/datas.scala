@@ -45,6 +45,13 @@ object datas {
       val (identifiers, joinClauses, compiledLifted) = QueryBase.doCompile(this, 0)
       val firstIdent = identifiers.head
 
+      println("----------------DEBUG----------------")
+      println("identifiers:")
+      identifiers.map(_.query[Unit].sql).toList.foreach(println)
+      println("join clauses:")
+      joinClauses.map(_.map(_.query[Unit].sql)).foreach(println)
+      println("----------------END DEBUG------------")
+
       val compiledJoin = (identifiers.tail, joinClauses).parMapN {
         case (ident, (kind, clause)) =>
           Fragment.const(kind) ++ ident ++ fr"on" ++ clause
@@ -73,10 +80,11 @@ object datas {
       qbase match {
         case t: FromTable[t] =>
           implicit val functorK = t.functorK
+          val scope = t.table.name + "_x" + currentIndex
           (
-            NonEmptyList.one(t.table.identifierFragment ++ Fragment.const("x" + currentIndex)),
+            NonEmptyList.one(t.table.identifierFragment ++ Fragment.const(scope)),
             Nil,
-            t.lifted.mapK(setScope("x" + currentIndex))
+            t.lifted.mapK(setScope(scope))
           )
         case j: Join[a, b] =>
           import j._
@@ -90,7 +98,7 @@ object datas {
           val allIdentifiers = leftIdentifier <+> rightIdentifier
 
           val thisJoinClause = onClause(leftClauseArgCompiled, rightClauseArgCompiled).compile.frag
-          val allClauses = leftClauses <+> List((kind, thisJoinClause)) <+> rightClauses
+          val allClauses = leftClauses <+> rightClauses <+> List((kind, thisJoinClause))
 
           (allIdentifiers, allClauses, Tuple2KK(leftClauseArgCompiled, rightClauseArgCompiled))
       }

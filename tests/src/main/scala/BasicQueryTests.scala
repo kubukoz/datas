@@ -146,6 +146,24 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       expectAllToBe(q)(
         ("John", 2L, 1L)
       )
+    },
+    test("(a join b) join (a join b)") {
+      //todo this needs some more thinking - maybe when compiling "from" don't return lists but trees? identifiers may come in different places than "on" clauses
+      val inner = bookSchema.innerJoin(bookSchema) { (b, bP) =>
+        equalOptionL(b.parentId, bP.id)
+      }
+
+      val q = inner
+        .innerJoin(inner) { (a, b) =>
+          equalOptionL(a.left.parentId, b.right.id)
+        }
+        .select { a =>
+          (a.left.left.id)
+        }
+
+      expectAllToBe(q)(
+        (1L)
+      )
     }
   )
 
