@@ -41,24 +41,8 @@ object datas {
 
   sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
-    def compileAsFrom: (Fragment, A[Reference]) = {
-      val (identifiers, joinClauses, compiledLifted) = QueryBase.doCompile(this, 0)
-      val firstIdent = identifiers.head
-
-      println("----------------DEBUG----------------")
-      println("identifiers:")
-      identifiers.map(_.query[Unit].sql).toList.foreach(println)
-      println("join clauses:")
-      joinClauses.map(_.map(_.query[Unit].sql)).foreach(println)
-      println("----------------END DEBUG------------")
-
-      val compiledJoin = (identifiers.tail, joinClauses).parMapN {
-        case (ident, (kind, clause)) =>
-          Fragment.const(kind) ++ ident ++ fr"on" ++ clause
-      }.combineAll
-
-      (firstIdent ++ compiledJoin, compiledLifted)
-    }
+    def compileAsFrom: (Fragment, A[Reference]) =
+      QueryBase.doCompile(this, 0).leftMap(_.fold)
   }
 
   object QueryBase {
@@ -76,31 +60,40 @@ object datas {
       * and a list of compiled join clauses (empty wehn it's a single FromTable node).
       * Also, the A of scoped references.
       */
-    def doCompile[A[_[_]]](qbase: QueryBase[A], currentIndex: Int): (NonEmptyList[Fragment], List[(JoinKind, Fragment)], A[Reference]) =
+    def doCompile[A[_[_]]](qbase: QueryBase[A], currentIndex: Int): (NonEmptyList[Fragment], A[Reference]) =
       qbase match {
         case t: FromTable[t] =>
           implicit val functorK = t.functorK
           val scope = t.table.name + "_x" + currentIndex
           (
             NonEmptyList.one(t.table.identifierFragment ++ Fragment.const(scope)),
-            Nil,
             t.lifted.mapK(setScope(scope))
           )
         case j: Join[a, b] =>
           import j._
           val indexBeforeLeft = currentIndex
 
-          val (leftIdentifier, leftClauses, leftClauseArgCompiled) = doCompile(left, indexBeforeLeft)
+          val (leftTrees, leftClauseArgCompiled) = doCompile(left, indexBeforeLeft)
 
-          val indexBeforeRight = indexBeforeLeft + leftIdentifier.size
-          val (rightIdentifier, rightClauses, rightClauseArgCompiled) = doCompile(right, indexBeforeRight)
-
-          val allIdentifiers = leftIdentifier <+> rightIdentifier
+          val indexBeforeRight = indexBeforeLeft + leftTrees.size
+          val (rightTrees, rightClauseArgCompiled) = doCompile(right, indexBeforeRight)
 
           val thisJoinClause = onClause(leftClauseArgCompiled, rightClauseArgCompiled).compile.frag
-          val allClauses = leftClauses <+> rightClauses <+> List((kind, thisJoinClause))
 
-          (allIdentifiers, allClauses, Tuple2KK(leftClauseArgCompiled, rightClauseArgCompiled))
+          //todo figure out how to avoid doing this crappy crap!
+          val rightTreesWithJoin = {
+            def modLast[X]: (X => X) => NonEmptyList[X] => NonEmptyList[X] = f => {
+              case nel @ NonEmptyList(_, _ :: _) => NonEmptyList.ofInitLast(nel.init, f(nel.last))
+              case NonEmptyList(h, Nil)          => NonEmptyList.one(f(h))
+            }
+
+            modLast[Fragment](
+              _ ++ fr"on" ++ thisJoinClause
+            )(rightTrees.copy(head = Fragment.const(kind) ++ rightTrees.head))
+          }
+          val allTrees = leftTrees <+> rightTreesWithJoin
+
+          (allTrees, Tuple2KK(leftClauseArgCompiled, rightClauseArgCompiled))
       }
 
   }

@@ -147,6 +147,70 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         ("John", 2L, 1L)
       )
     },
+    test("(((a join b) join c) join d)") {
+      val q = bookSchema
+        .innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }
+        .innerJoin(
+          userSchema
+        ) { (t, u) =>
+          equal(u.id, t.left.userId)
+        }
+        .innerJoin(userSchema) { (t, u) =>
+          equal(u.id, t.left.left.userId)
+        }
+        .select(_.right.id)
+
+      expectAllToBe(q)(
+        (1L)
+      )
+    },
+    test("(((a join b) join c) join d) join (((e join f) join g) join h)") {
+      val q = bookSchema
+        .innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }
+        .innerJoin(
+          userSchema
+        ) { (t, u) =>
+          equal(u.id, t.left.userId)
+        }
+        .innerJoin(userSchema) { (t, u) =>
+          equal(u.id, t.left.left.userId)
+        }
+
+      val superQ = q
+        .innerJoin(q) { (a, b) =>
+          equal(a.left.left.left.userId, b.right.id)
+        }
+        .select(_ => Reference.Single(ReferenceData.Raw(fr"1"), doobie.Read[Long]))
+
+      expectAllToBe(superQ)(
+        (1L)
+      )
+    },
+    test("a join (b join (c join d))") {
+      val inner = userSchema.innerJoin(
+        bookSchema.innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }
+      ) { (u, t) =>
+        equal(u.id, t.left.userId)
+      }
+
+      val q = userSchema.innerJoin(
+        inner
+      ) { (u, t) =>
+        equal(u.id, t.right.right.userId)
+      }
+
+      // val one = Reference.Single(ReferenceData.Raw(fr"1"), doobie.Read[Int])
+
+      expectAllToBe(q.select(_.left.id))(
+        (1L)
+      )
+    },
     test("(a join b) join (a join b)") {
       //todo this needs some more thinking - maybe when compiling "from" don't return lists but trees? identifiers may come in different places than "on" clauses
       val inner = bookSchema.innerJoin(bookSchema) { (b, bP) =>
