@@ -34,9 +34,9 @@ object InitialTests extends IOApp {
     .widen[Transactor[IO]]
 
   override def run(args: List[String]): IO[ExitCode] =
-    transactor.use { xa =>
+    transactor.use { implicit xa =>
       val tests =
-        BasicJoinQueryTests.runSuite(xa)
+        new BasicJoinQueryTests().run
 
       runTests(args)(Tests.sequence(NonEmptyList.one(tests)))
     }

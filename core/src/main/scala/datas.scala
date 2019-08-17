@@ -1,19 +1,18 @@
-import cats.effect._
 import cats.implicits._
 import doobie.util.fragment.Fragment
 import doobie._
 import doobie.implicits._
 import cats.data.Chain
 import cats.data.State
-import cats.Applicative
 import cats.tagless.FunctorK
 import cats.~>
 import cats.tagless.implicits._
 import cats.Apply
 import shapeless.HNil
 import shapeless.{:: => HCons}
-import datas.QueryBase.FromTable
-import datas.QueryBase.Join
+import cats.mtl.MonadState
+import cats.mtl.instances.all._
+import cats.FlatMap
 
 object datas {
   type ColumnList = List[Column]
@@ -32,92 +31,72 @@ object datas {
         .run(Chain.empty)
         .map {
           case (_, data) =>
-            TableQuery(QueryBase.FromTable(name), data)
+            TableQuery(QueryBase.FromTable(name, data, FunctorK[F]))
         }
         .value
   }
-  //todo derivation
-  //todo make sure schema must have a table
 
   final case class TableName(name: String) extends AnyVal {
     def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
   }
 
-  sealed trait QueryBase extends Product with Serializable {
+  sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
-    def joinWith[A[_[_]], B[_[_]]](
-      another: QueryBase,
-      kind: JoinKind,
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean],
-      ll: A[Reference],
-      rr: B[Reference]
-    ): QueryBase = QueryBase.Join(this, another, kind, onClause, ll, rr)
+    def compileAsFrom: (Fragment, A[Reference]) =
+      QueryBase.doCompile[A, State[Int, *]](this).runA(0).value
+  }
 
-    def compileAsFrom: Fragment =
-      this match {
-        case FromTable(table) => table.identifierFragment
-        case Join(left, right, kind, onClause, ll, rr) =>
-          left.compileAsFrom ++
-            Fragment.const(kind) ++
-            right.compileAsFrom ++
-            fr"on" ++
-            onClause(ll, rr).compile.frag
-      }
+  type IndexState[F[_]] = MonadState[F, Int]
+
+  object IndexState {
+    def apply[F[_]](implicit F: IndexState[F]): IndexState[F] = F
+    def getAndInc[F[_]: IndexState: Apply]: F[Int] = IndexState[F].get <* IndexState[F].modify(_ + 1)
   }
 
   object QueryBase {
-    final case class FromTable(table: TableName) extends QueryBase
+    final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], functorK: FunctorK[A]) extends QueryBase[A]
     final case class Join[A[_[_]], B[_[_]]](
-      left: QueryBase,
-      right: QueryBase,
+      left: QueryBase[A],
+      right: QueryBase[B],
       kind: JoinKind,
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean],
-      leftLifted: A[Reference],
-      rightLifted: B[Reference]
-    ) extends QueryBase
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
+    ) extends QueryBase[Tuple2KK[A, B, *[_]]]
+
+    /**
+      * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
+      */
+    def doCompile[A[_[_]], F[_]: IndexState: FlatMap](qbase: QueryBase[A]): F[(Fragment, A[Reference])] =
+      qbase match {
+        case t: FromTable[t] =>
+          implicit val functorK = t.functorK
+          IndexState.getAndInc[F].map { index =>
+            val scope = t.table.name + "_x" + index
+            (
+              t.table.identifierFragment ++ Fragment.const(scope),
+              t.lifted.mapK(setScope(scope))
+            )
+          }
+
+        case j: Join[a, b] =>
+          import j._
+          (doCompile[a, F](left), doCompile[b, F](right)).mapN {
+            case ((leftFrag, leftCompiledReference), (rightFrag, rightCompiledReference)) =>
+              val thisJoinClause = onClause(leftCompiledReference, rightCompiledReference).compile.frag
+
+              val joinFrag = leftFrag ++ Fragment.const(kind) ++ rightFrag ++ fr"on" ++ thisJoinClause
+
+              (joinFrag, Tuple2KK(leftCompiledReference, rightCompiledReference))
+          }
+      }
+
   }
 
   type JoinKind = String
 
-  // final case class Join(kind: JoinKind, withTable: TableName, withTableSymbol: String, onClause: Reference[Boolean]) {
-  /* Fragment.const(join.kind) ++
-        join.withTable.identifierFragment ++
-        Fragment.const(" " + join.withTableSymbol) ++
-        fr"on" ++
-        join.onClause.compile.frag */
-  // }
-
-  final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
-    def asTuple: (A[F], B[F]) = (left, right)
-  }
-
-  object Tuple2KK {
-    implicit def functorK[A[_[_]]: FunctorK, B[_[_]]: FunctorK]: FunctorK[Tuple2KK[A, B, ?[_]]] = new FunctorK[Tuple2KK[A, B, ?[_]]] {
-      def mapK[F[_], G[_]](af: Tuple2KK[A, B, F])(fk: F ~> G): Tuple2KK[A, B, G] = Tuple2KK(af.left.mapK(fk), af.right.mapK(fk))
-    }
-  }
-
-  final case class GetSymbol(private val state: List[String]) {
-
-    def next: (GetSymbol, String) =
-      GetSymbol.getSymbol.run(state).map(_.leftMap(GetSymbol(_))).value
-  }
-
-  object GetSymbol {
-    val initial = GetSymbol(Nil)
-    private[GetSymbol] type SymbolST = State[List[String], String]
-
-    private[GetSymbol] val getSymbol: SymbolST = State {
-      case Nil => (List("a"), "a")
-      case head :: t =>
-        val newSymbol = (head.head + 1).toChar.toString
-        (newSymbol :: head :: t, newSymbol)
-    }
-  }
-
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
-  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase, lifted: A[Reference]) {
+  //todo this class is redundant, should be merged with querybase next
+  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase[A]) {
 
     def innerJoin[B[_[_]]: FunctorK](
       another: TableQuery[B]
@@ -132,52 +111,24 @@ object datas {
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): JoinedTableQuery[A, B] =
       TableQuery(
-        base.joinWith(another.base, kind, onClause, lifted, another.lifted),
-        Tuple2KK(
-          lifted,
-          another.lifted
-        )
+        QueryBase.Join(base, another.base, kind, onClause)
       )
-    /*
-    private def setScope(scope: String) = Reference.mapData {
-      λ[ReferenceData ~> ReferenceData] {
-        case ReferenceData.Column(n, None) =>
-          ReferenceData.Column(n, Some(scope))
-        case c @ ReferenceData.Column(_, Some(_)) =>
-          println("ignoring already defined scope! " + c + ", " + scope)
-          c
-        case c => c
-      }
-    } */
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
-      Query(base, lifted.pure[SymbolState], selection, filters = Chain.empty)
+      Query(base, selection, filters = Chain.empty)
   }
 
-  def over[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
-    binary(_ ++ fr">" ++ _)
-
-  def equal[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
-    binary(_ ++ fr"=" ++ _)
-
-  def equalOptionL[Type]: (Reference[Option[Type]], Reference[Type]) => Reference[Boolean] =
-    binary(_ ++ fr"=" ++ _)
-
-  def notNull[Type]: Reference[Option[Type]] => Reference[Boolean] =
-    a =>
-      Reference.Single(
-        ReferenceData.Raw(a.compile.frag ++ fr"is not null"),
-        Read[Boolean]
-      )
-
-  def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
-    binary(_ ++ fr"<>" ++ _)
-
-  def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
-    Reference.Single(
-      ReferenceData.Raw(f(l.compile.frag, r.compile.frag)),
-      Read[Boolean]
-    )
+  private def setScope(scope: String) = Reference.mapData {
+    λ[ReferenceData ~> ReferenceData] {
+      case ReferenceData.Column(n, None) =>
+        ReferenceData.Column(n, Some(scope))
+      case c @ ReferenceData.Column(_, Some(_)) =>
+        //todo this case is impossible, we should have that in the types
+        //or else inline it with the catch-all below
+        c
+      case c => c
+    }
+  }
 
   final case class Column(name: String) extends AnyVal
 
@@ -225,17 +176,8 @@ object datas {
     }
   }
 
-  final case class TableSymbol(value: String) extends AnyVal
-
-  type SymbolState[A] = State[Int, A]
-
-  object SymbolState {
-    val next: SymbolState[TableSymbol] = State.get[Int].map("x" + _).map(TableSymbol(_)) <* State.modify[Int](_ + 1)
-  }
-
   final case class Query[A[_[_]], Queried](
-    base: QueryBase,
-    lifted: SymbolState[A[Reference]],
+    base: QueryBase[A],
     selection: A[Reference] => Reference[Queried],
     filters: Chain[A[Reference] => Reference[Boolean]]
   ) {
@@ -243,27 +185,25 @@ object datas {
     def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
       copy(filters = filters.append(filter))
 
-    def compileSql: Query0[Queried] =
-      lifted
-        .map { lifted =>
-          val compiledSelection = selection(lifted).compile
+    def compileSql: Query0[Queried] = {
+      val (compiledFrom, compiledReference) = base.compileAsFrom
 
-          implicit val read: Read[Queried] = compiledSelection.read
+      val compiledSelection = selection(compiledReference).compile
 
-          val frag = fr"select" ++ compiledSelection.frag ++
-            fr"from" ++ base.compileAsFrom ++
-            Fragments.whereAnd(
-              filters.map(_.apply(lifted).compile.frag).toList: _*
-            )
+      implicit val read: Read[Queried] = compiledSelection.read
 
-          frag.query[Queried]
-        }
-        .runA(0)
-        .value
+      val frag = fr"select" ++ compiledSelection.frag ++
+        fr"from" ++ compiledFrom ++
+        Fragments.whereAnd(
+          filters.map(_.apply(compiledReference).compile.frag).toList: _*
+        )
+
+      frag.query[Queried]
+    }
   }
 
   trait ReferenceCompiler {
-    def compileReference[Type](column: Reference[Type]): TypedFragment[Type]
+    def compileReference: Reference ~> TypedFragment
   }
 
   final case class TypedFragment[Type](frag: Fragment, read: Read[Type]) {
@@ -280,143 +220,61 @@ object datas {
   object ReferenceCompiler {
 
     val default: ReferenceCompiler = new ReferenceCompiler {
-      private def compileScoped[F[_]: Applicative, Type](reference: Reference[Type]): F[TypedFragment[Type]] =
-        reference match {
-          case Reference.Single(data, read) =>
-            compileData[F, Type](read).apply(data)
-          case m: Reference.Map[a, b] =>
-            compileScoped[F, a](m.underlying).map(_.map(m.f))
-          case p: Reference.Product[a, b] =>
-            (compileScoped[F, a](p.left), compileScoped[F, b](p.right)).mapN(_ product _)
-        }
-
-      private def compileData[F[_]: Applicative, Type](read: Read[Type]): ReferenceData[Type] => F[TypedFragment[Type]] = {
+      private def compileData[Type](read: Read[Type]): ReferenceData[Type] => TypedFragment[Type] = {
         case ReferenceData.Column(column, scope) =>
           val scopeString = scope.foldMap(_ + ".")
           TypedFragment[Type](
             Fragment.const(scopeString + "\"" + column.name + "\""),
             read
-          ).pure[F]
+          )
         case l: ReferenceData.Lift[a] =>
           implicit val param: Param[a HCons HNil] = l.into
           val _ = param //to make scalac happy
-          TypedFragment[Type](fr"${l.value}", read).pure[F]
+          TypedFragment[Type](fr"${l.value}", read)
         case r: ReferenceData.Raw[a] =>
-          TypedFragment[Type](r.fragment, read).pure[F]
+          TypedFragment[Type](r.fragment, read)
       }
 
-      def compileReference[Type](reference: Reference[Type]): TypedFragment[Type] =
-        compileScoped[cats.Id, Type](reference)
+      val compileReference: Reference ~> TypedFragment = λ[Reference ~> TypedFragment] {
+        case Reference.Single(data, read) => compileData(read)(data)
+        case m: Reference.Map[a, b]       => compileReference(m.underlying).map(m.f)
+        case p: Reference.Product[a, b]   => compileReference(p.left) product compileReference(p.right)
+      }
     }
   }
-}
 
-final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
-
-object User {
-  implicit val functorK: FunctorK[User] = new FunctorK[User] {
-
-    def mapK[F[_], G[_]](af: User[F])(fk: F ~> G): User[G] =
-      User(fk(af.id), fk(af.name), fk(af.age))
+  final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
+    def asTuple: (A[F], B[F]) = (left, right)
   }
-}
 
-final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]])
-
-object Book {
-  implicit val functorK: FunctorK[Book] = new FunctorK[Book] {
-
-    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] =
-      Book(fk(af.id), fk(af.userId), fk(af.parentId))
+  object Tuple2KK {
+    implicit def functorK[A[_[_]]: FunctorK, B[_[_]]: FunctorK]: FunctorK[Tuple2KK[A, B, ?[_]]] = new FunctorK[Tuple2KK[A, B, ?[_]]] {
+      def mapK[F[_], G[_]](af: Tuple2KK[A, B, F])(fk: F ~> G): Tuple2KK[A, B, G] = Tuple2KK(af.left.mapK(fk), af.right.mapK(fk))
+    }
   }
-}
 
-object Demo extends IOApp {
-  import datas._
+  def over[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
+    binary(_ ++ fr">" ++ _)
 
-  import schemas.caseClassSchema
-  import schemas.column
+  def equal[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
+    binary(_ ++ fr"=" ++ _)
 
-  val bookSchema: TableQuery[Book] =
-    caseClassSchema(
-      TableName("books"),
-      (
-        column[Long]("id"),
-        column[Long]("user_id"),
-        column[Option[Long]]("parent_id")
-      ).mapN(Book[Reference])
-    ) //types explicit, less typing
+  def equalOptionL[Type]: (Reference[Option[Type]], Reference[Type]) => Reference[Boolean] =
+    binary(_ ++ fr"=" ++ _)
 
-  val userSchema: TableQuery[User] =
-    caseClassSchema(
-      TableName("users"),
-      Applicative[schemas.ST].map3(column[Long]("id"), column[String]("name"), column[Int]("age"))(
-        User[Reference]
-      ) //types automatically inferred
-    )
-
-  val qq2: TableQuery[Tuple2KK[Tuple2KK[User, Book, ?[_]], Book, ?[_]]] =
-    userSchema.innerJoin(bookSchema)((u, b) => equal(u.id, b.userId)).innerJoin(bookSchema)((u, b) => equal(u.left.id, b.id))
-
-  val q2 =
-    qq2
-      .select {
-        _.asTuple.leftMap(_.asTuple) match {
-          case ((user, book1), book2) =>
-            (user.age, user.name, book1.userId, book2.id, user.id).tupled
-        }
-      }
-      .where {
-        _.asTuple.leftMap(_.asTuple) match {
-          case ((user, _), _) => equal(user.age, Reference.lift(18))
-        }
-      }
-      .where(t => equal(t.right.id, Reference.lift(1L)))
-
-  val q3 =
-    userSchema
-      .innerJoin(bookSchema.innerJoin(bookSchema)((u, b) => equal(u.id, b.id)))(
-        (u, b) => equal(u.id, b.left.userId)
+  def notNull[Type]: Reference[Option[Type]] => Reference[Boolean] =
+    a =>
+      Reference.Single(
+        ReferenceData.Raw(a.compile.frag ++ fr"is not null"),
+        Read[Boolean]
       )
-      .select {
-        _.asTuple.map(_.asTuple) match {
-          case (user, (book1, book2)) =>
-            (user.age, user.name, book1.userId, book2.id, user.id).tupled
-        }
-      }
-      .where {
-        _.asTuple match {
-          case (user, _) => equal(user.age, Reference.lift(18))
-        }
-      }
-      .where(t => equal(t.right.right.id, Reference.lift(1L)))
 
-  println(q3.compileSql)
+  def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
+    binary(_ ++ fr"<>" ++ _)
 
-  val a = {
-    userSchema
-      .innerJoin(bookSchema)((u, b) => equal(u.id, b.userId))
-      .innerJoin(bookSchema) {
-        case (Tuple2KK(_, b), bP) =>
-          equal(b.parentId, bP.id.map(Option(_)))
-      }
-      .select(_.right.id)
-  }
-
-  val xa = Transactor.fromDriverManager[IO](
-    "org.postgresql.Driver",
-    "jdbc:postgresql://localhost:5432/postgres",
-    "postgres",
-    "postgres"
-  )
-
-  def getAll[A[_[_]], Queried](q: Query[A, Queried]): IO[Unit] =
-    IO {
-      println("\n\nstarting")
-      println(q)
-      println(q.compileSql.sql)
-    } *> q.compileSql.stream.transact(xa).map(_.toString).showLinesStdOut.compile.drain *> IO(println("\n\n"))
-
-  def run(args: List[String]): IO[ExitCode] =
-    getAll(q2) *> getAll(a) *> (if (false) getAll(q3) else IO.unit).as(ExitCode.Success)
+  def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
+    Reference.Single(
+      ReferenceData.Raw(f(l.compile.frag, r.compile.frag)),
+      Read[Boolean]
+    )
 }

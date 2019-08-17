@@ -10,19 +10,33 @@ import cats.kernel.Eq
 import cats.Show
 import flawless.stats.Location
 
-object BasicJoinQueryTests {
+final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
   implicit def showTuple3[A: Show, B: Show, C: Show]: Show[(A, B, C)] = {
     case (a, b, c) => show"($a, $b, $c)"
   }
 
+  implicit def showTuple9[
+    A: Show,
+    B: Show,
+    C: Show,
+    D: Show,
+    E: Show,
+    F: Show,
+    G: Show,
+    H: Show,
+    I: Show
+  ]: Show[(A, B, C, D, E, F, G, H, I)] = {
+    case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
+  }
+
   import flawless.syntax._
   import datas._
 
-  def runSuite(implicit xa: Transactor[IO]): Tests[SuiteResult] =
-    singleTableTests// |+| innerJoinTests
+  def run: Tests[SuiteResult] =
+    singleTableTests |+| innerJoinTests
 
-  def singleTableTests(implicit xa: Transactor[IO]) = tests(
+  def singleTableTests = tests(
     test("basic query from single table") {
 
       val q =
@@ -95,7 +109,7 @@ object BasicJoinQueryTests {
     }
   )
 
-  def innerJoinTests(implicit xa: Transactor[IO]) = tests(
+  def innerJoinTests = tests(
     test("inner join users and books") {
       val q = userSchema
         .innerJoin(bookSchema) { (u, b) =>
@@ -146,10 +160,104 @@ object BasicJoinQueryTests {
       expectAllToBe(q)(
         ("John", 2L, 1L)
       )
+    },
+    test("(((a join b) join c) join d)") {
+      val q = bookSchema
+        .innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }
+        .innerJoin(
+          userSchema
+        ) { (t, u) =>
+          equal(u.id, t.left.userId)
+        }
+        .innerJoin(userSchema) { (t, u) =>
+          equal(u.id, t.left.left.userId)
+        }
+        .select(_.right.id)
+
+      expectAllToBe(q)(
+        (3L)
+      )
+    },
+    test("(((a join b) join c) join d) join (((e join f) join g) join h)") {
+      val q = bookSchema
+        .innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }
+        .innerJoin(
+          userSchema
+        ) { (t, u) =>
+          equal(u.id, t.left.userId)
+        }
+        .innerJoin(userSchema) { (t, u) =>
+          equal(u.id, t.left.left.userId)
+        }
+
+      val superQ = q
+        .innerJoin(q) { (a, b) =>
+          equal(a.left.left.left.userId, b.right.id)
+        }
+        .select(
+          x =>
+            (
+              x.left.left.left.left.id,
+              x.left.left.left.right.id,
+              x.left.left.right.id,
+              x.left.right.id,
+              x.right.left.left.left.id,
+              x.right.left.left.right.id,
+              x.right.left.left.right.parentId,
+              x.right.left.right.id,
+              x.right.right.id
+            ).tupled
+        )
+
+      expectAllToBe(superQ)(
+        (2L, 1L, 3L, 3L, 2L, 1L, None, 3L, 3L)
+      )
+    },
+    test("a join (b join (c join d))") {
+      val inner = userSchema.innerJoin(
+        bookSchema.innerJoin(bookSchema) { (b, bP) =>
+          equalOptionL(b.parentId, bP.id)
+        }
+      ) { (u, t) =>
+        equal(u.id, t.left.userId)
+      }
+
+      val q = userSchema.innerJoin(
+        inner
+      ) { (u, t) =>
+        equal(u.id, t.right.right.userId)
+      }
+
+      expectAllToBe(q.select(_.left.id))(
+        2L
+      )
+    },
+    test("(a join b) join (a join b)") {
+      //todo this needs some more thinking - maybe when compiling "from" don't return lists but trees? identifiers may come in different places than "on" clauses
+      val inner = bookSchema.innerJoin(bookSchema) { (b, bP) =>
+        equalOptionL(b.parentId, bP.id)
+      }
+
+      val q = inner
+        .innerJoin(inner) { (a, b) =>
+          equalOptionL(a.left.parentId, b.right.id)
+        }
+        .select { a =>
+          (a.left.left.id)
+        }
+
+      expectAllToBe(q)(
+        (2L)
+      )
     }
   )
 
-  def debug[A]: Pipe[IO, A, A] = if (false) _.evalTap(s => IO(println(s))) else identity
+  val debugOn = false
+  def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
   def expectAllToBe[A[_[_]], Queried: Eq: Show](
     q: Query[A, Queried]
@@ -162,14 +270,16 @@ object BasicJoinQueryTests {
     line: sourcecode.Line
   ): IO[Assertions] = {
     val expectedList = first :: rest.toList
+    val showQuery = (if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit)
 
-    q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
+    showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
         Assertions(
           Assertion.Failed(
             AssertionFailure(
               show"""An exception occured, but $expectedList was expected.
-              |Relevant query: ${q.toString}
+              |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
+              |Compiled: ${q.compileSql.sql}
               |Exception message: ${exception.getMessage}""".stripMargin,
               Location(file.value, line.value)
             )
