@@ -16,6 +16,20 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     case (a, b, c) => show"($a, $b, $c)"
   }
 
+  implicit def showTuple9[
+    A: Show,
+    B: Show,
+    C: Show,
+    D: Show,
+    E: Show,
+    F: Show,
+    G: Show,
+    H: Show,
+    I: Show
+  ]: Show[(A, B, C, D, E, F, G, H, I)] = {
+    case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
+  }
+
   import flawless.syntax._
   import datas._
 
@@ -163,7 +177,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         .select(_.right.id)
 
       expectAllToBe(q)(
-        (1L)
+        (3L)
       )
     },
     test("(((a join b) join c) join d) join (((e join f) join g) join h)") {
@@ -184,10 +198,23 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         .innerJoin(q) { (a, b) =>
           equal(a.left.left.left.userId, b.right.id)
         }
-        .select(_ => Reference.Single(ReferenceData.Raw(fr"1"), doobie.Read[Long]))
+        .select(
+          x =>
+            (
+              x.left.left.left.left.id,
+              x.left.left.left.right.id,
+              x.left.left.right.id,
+              x.left.right.id,
+              x.right.left.left.left.id,
+              x.right.left.left.right.id,
+              x.right.left.left.right.parentId,
+              x.right.left.right.id,
+              x.right.right.id
+            ).tupled
+        )
 
       expectAllToBe(superQ)(
-        (1L)
+        (2L, 1L, 3L, 3L, 2L, 1L, None, 3L, 3L)
       )
     },
     test("a join (b join (c join d))") {
@@ -205,10 +232,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         equal(u.id, t.right.right.userId)
       }
 
-      // val one = Reference.Single(ReferenceData.Raw(fr"1"), doobie.Read[Int])
-
       expectAllToBe(q.select(_.left.id))(
-        (1L)
+        2L
       )
     },
     test("(a join b) join (a join b)") {
@@ -226,12 +251,13 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         }
 
       expectAllToBe(q)(
-        (1L)
+        (2L)
       )
     }
   )
 
-  def debug[A]: Pipe[IO, A, A] = if (false) _.evalTap(s => IO(println(s))) else identity
+  val debugOn = false
+  def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
   def expectAllToBe[A[_[_]], Queried: Eq: Show](
     q: Query[A, Queried]
@@ -244,8 +270,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     line: sourcecode.Line
   ): IO[Assertions] = {
     val expectedList = first :: rest.toList
+    val showQuery = (if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit)
 
-    IO(println(show"Testing query: ${q.compileSql.sql}")) *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
+    showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
         Assertions(
           Assertion.Failed(
@@ -258,7 +285,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
             )
           )
         )
-      case Right(values) => values shouldBe values
+      case Right(values) => values shouldBe expectedList
     }
   }
 
