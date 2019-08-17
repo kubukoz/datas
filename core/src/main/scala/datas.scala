@@ -4,14 +4,12 @@ import doobie._
 import doobie.implicits._
 import cats.data.Chain
 import cats.data.State
-import cats.Applicative
 import cats.tagless.FunctorK
 import cats.~>
 import cats.tagless.implicits._
 import cats.Apply
 import shapeless.HNil
 import shapeless.{:: => HCons}
-import cats.data.NonEmptyList
 import cats.mtl.MonadState
 import cats.mtl.instances.all._
 import cats.FlatMap
@@ -65,10 +63,7 @@ object datas {
     ) extends QueryBase[Tuple2KK[A, B, *[_]]]
 
     /**
-      * Returns: identifiers involved in this query
-      * (one when it's a single FromTable node, multiple if it's a join),
-      * and a list of compiled join clauses (empty wehn it's a single FromTable node).
-      * Also, the A of scoped references.
+      * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
       */
     def doCompile[A[_[_]], F[_]: IndexState: FlatMap](qbase: QueryBase[A]): F[(Fragment, A[Reference])] =
       qbase match {
@@ -128,7 +123,8 @@ object datas {
       case ReferenceData.Column(n, None) =>
         ReferenceData.Column(n, Some(scope))
       case c @ ReferenceData.Column(_, Some(_)) =>
-        println("ignoring already defined scope! " + c + ", " + scope)
+        //todo this case is impossible, we should have that in the types
+        //or else inline it with the catch-all below
         c
       case c => c
     }
@@ -207,7 +203,7 @@ object datas {
   }
 
   trait ReferenceCompiler {
-    def compileReference[Type](column: Reference[Type]): TypedFragment[Type]
+    def compileReference: Reference ~> TypedFragment
   }
 
   final case class TypedFragment[Type](frag: Fragment, read: Read[Type]) {
@@ -224,33 +220,26 @@ object datas {
   object ReferenceCompiler {
 
     val default: ReferenceCompiler = new ReferenceCompiler {
-      private def compileScoped[F[_]: Applicative, Type](reference: Reference[Type]): F[TypedFragment[Type]] =
-        reference match {
-          case Reference.Single(data, read) =>
-            compileData[F, Type](read).apply(data)
-          case m: Reference.Map[a, b] =>
-            compileScoped[F, a](m.underlying).map(_.map(m.f))
-          case p: Reference.Product[a, b] =>
-            (compileScoped[F, a](p.left), compileScoped[F, b](p.right)).mapN(_ product _)
-        }
-
-      private def compileData[F[_]: Applicative, Type](read: Read[Type]): ReferenceData[Type] => F[TypedFragment[Type]] = {
+      private def compileData[Type](read: Read[Type]): ReferenceData[Type] => TypedFragment[Type] = {
         case ReferenceData.Column(column, scope) =>
           val scopeString = scope.foldMap(_ + ".")
           TypedFragment[Type](
             Fragment.const(scopeString + "\"" + column.name + "\""),
             read
-          ).pure[F]
+          )
         case l: ReferenceData.Lift[a] =>
           implicit val param: Param[a HCons HNil] = l.into
           val _ = param //to make scalac happy
-          TypedFragment[Type](fr"${l.value}", read).pure[F]
+          TypedFragment[Type](fr"${l.value}", read)
         case r: ReferenceData.Raw[a] =>
-          TypedFragment[Type](r.fragment, read).pure[F]
+          TypedFragment[Type](r.fragment, read)
       }
 
-      def compileReference[Type](reference: Reference[Type]): TypedFragment[Type] =
-        compileScoped[cats.Id, Type](reference)
+      val compileReference: Reference ~> TypedFragment = λ[Reference ~> TypedFragment] {
+        case Reference.Single(data, read) => compileData(read)(data)
+        case m: Reference.Map[a, b]       => compileReference(m.underlying).map(m.f)
+        case p: Reference.Product[a, b]   => compileReference(p.left) product compileReference(p.right)
+      }
     }
   }
 
