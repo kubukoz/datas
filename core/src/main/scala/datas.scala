@@ -96,15 +96,12 @@ object datas {
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
   //todo this class is redundant, should be merged with querybase next
-  final case class TableQuery[A[_[_]]: FunctorK](base: QueryBase[A]) {
+  final case class TableQuery[A[_[_]]](base: QueryBase[A]) {
 
-    def innerJoin[B[_[_]]: FunctorK](
-      another: TableQuery[B]
-    )(
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): JoinedTableQuery[A, B] = join(another, "inner join")(onClause)
+    def innerJoin[B[_[_]]](another: TableQuery[B])(onClause: (A[Reference], B[Reference]) => Reference[Boolean]): JoinedTableQuery[A, B] =
+      join(another, "inner join")(onClause)
 
-    def join[B[_[_]]: FunctorK](
+    def join[B[_[_]]](
       another: TableQuery[B],
       kind: JoinKind
     )(
@@ -243,14 +240,9 @@ object datas {
     }
   }
 
+  //A tuple2 of even-higher-kinded types.
   final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
     def asTuple: (A[F], B[F]) = (left, right)
-  }
-
-  object Tuple2KK {
-    implicit def functorK[A[_[_]]: FunctorK, B[_[_]]: FunctorK]: FunctorK[Tuple2KK[A, B, ?[_]]] = new FunctorK[Tuple2KK[A, B, ?[_]]] {
-      def mapK[F[_], G[_]](af: Tuple2KK[A, B, F])(fk: F ~> G): Tuple2KK[A, B, G] = Tuple2KK(af.left.mapK(fk), af.right.mapK(fk))
-    }
   }
 
   def over[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
