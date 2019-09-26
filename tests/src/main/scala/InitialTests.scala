@@ -33,13 +33,13 @@ object InitialTests extends IOApp with TestApp {
     }
     .widen[Transactor[IO]]
 
-  override def run(args: List[String]): IO[ExitCode] =
-    transactor.use { implicit xa =>
-      val tests =
-        new BasicJoinQueryTests().run
-
-      runTests(args)(Suites.sequential(tests.toSuites))
+  override def run(args: List[String]): IO[ExitCode] = runTests(args) {
+    Suites.resource {
+      transactor.map { implicit xa =>
+        new BasicJoinQueryTests().run.toSuites
+      }
     }
+  }
 
   private def fixedPool(size: Int) =
     Resource.make(IO(Executors.newFixedThreadPool(size)))(ec => IO(ec.shutdown()))
