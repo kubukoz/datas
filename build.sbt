@@ -21,14 +21,14 @@ val compilerPlugins = List(
 )
 
 val commonSettings = Seq(
-  scalaVersion := "2.12.8",
+  scalaVersion := "2.12.10",
   scalacOptions ++= Options.all,
   name := "datas",
   updateOptions := updateOptions.value.withGigahorse(false), //may fix publishing bug
   libraryDependencies ++= Seq(
-    "org.tpolecat" %% "doobie-core" % "0.7.0",
-    "org.tpolecat" %% "doobie-postgres" % "0.7.0",
-    "org.tpolecat" %% "doobie-hikari" % "0.7.0",
+    "org.tpolecat" %% "doobie-core" % "0.8.2",
+    "org.tpolecat" %% "doobie-postgres" % "0.8.2",
+    "org.tpolecat" %% "doobie-hikari" % "0.8.2",
     "org.typelevel" %% "cats-effect" % "2.0.0",
     "org.typelevel" %% "cats-tagless-macros" % "0.10",
     "org.typelevel" %% "cats-mtl-core" % "0.7.0"
