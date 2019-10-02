@@ -265,7 +265,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     first: Queried,
     rest: Queried*
   )(
-    implicit xa: Transactor[IO],
+    implicit
     file: sourcecode.File,
     line: sourcecode.Line
   ): IO[Assertions] = {

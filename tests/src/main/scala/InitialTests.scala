@@ -27,7 +27,7 @@ object InitialTests extends IOApp {
             "postgres",
             "postgres",
             boundedEc,
-            blocker.blockingContext
+            blocker
           )
           .evalTap(runMigrations("/init.sql"))
     }
@@ -47,7 +47,7 @@ object InitialTests extends IOApp {
   private def runMigrations(fileName: String)(xa: Transactor[IO])(implicit blocker: Blocker): IO[Unit] = {
     val load = fs2
       .io
-      .readInputStream[IO](IO(getClass.getResourceAsStream(fileName)), 4096, blocker.blockingContext)
+      .readInputStream[IO](IO(getClass.getResourceAsStream(fileName)), 4096, blocker)
       .through(fs2.text.utf8Decode[IO])
       .compile
       .foldMonoid
