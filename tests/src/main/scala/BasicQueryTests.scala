@@ -1,14 +1,18 @@
 import doobie.Transactor
 import doobie.implicits._
-import flawless._
-import cats.effect._
+import flawless.dsl._
+import flawless.predicates.all._
+import cats.effect.{test => _, _}
 import cats.implicits._
 import cats.tagless.FunctorK
 import cats.~>
 import fs2.Pipe
-import cats.kernel.Eq
 import cats.Show
-import flawless.stats.Location
+import cats.data.NonEmptyList
+import com.softwaremill.diffx.Diff
+import flawless.data.Suite
+import flawless.data.Assertion
+import com.softwaremill.diffx.Derived
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -30,11 +34,12 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
   }
 
-  import flawless.syntax._
   import datas._
 
-  def run: Tests[SuiteResult] =
-    singleTableTests |+| innerJoinTests
+  def run: Suite[IO] =
+    suite("BasicQueryTests") {
+      singleTableTests |+| innerJoinTests
+    }
 
   def singleTableTests = tests(
     test("basic query from single table") {
@@ -259,33 +264,32 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val debugOn = false
   def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
-  def expectAllToBe[A[_[_]], Queried: Eq: Show](
+  def expectAllToBe[A[_[_]], Queried: Show: Diff](
     q: Query[A, Queried]
   )(
     first: Queried,
     rest: Queried*
   )(
-    implicit
-    file: sourcecode.File,
-    line: sourcecode.Line
-  ): IO[Assertions] = {
+    implicit xa: Transactor[IO]
+  ): IO[NonEmptyList[Assertion]] = {
     val expectedList = first :: rest.toList
     val showQuery = (if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit)
 
     showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
-        Assertions(
-          Assertion.Failed(
-            AssertionFailure(
-              show"""An exception occured, but $expectedList was expected.
+        Assertion
+          .Failed(
+            show"""An exception occured, but $expectedList was expected.
               |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
               |Compiled: ${q.compileSql.sql}
-              |Exception message: ${exception.getMessage}""".stripMargin,
-              Location(file.value, line.value)
-            )
+              |Exception message: ${exception.getMessage}""".stripMargin
           )
-        )
-      case Right(values) => values shouldBe expectedList
+          .pure[NonEmptyList]
+      case Right(values) =>
+        implicit val diffOptionQueried: Diff[Option[Queried]] = Diff.diffForOption[Queried](Derived(Diff[Queried]))
+        implicit val diffListQueried: Diff[List[Queried]] = Diff.diffForIterable[Queried, List](Derived(diffOptionQueried))
+
+        ensure(values, equalTo(expectedList))
     }
   }
 

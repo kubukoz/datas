@@ -1,6 +1,5 @@
 import java.util.concurrent.Executors
 
-import cats.data.NonEmptyList
 import cats.effect.Blocker
 import cats.effect.ExitCode
 import cats.effect.IO
@@ -13,8 +12,10 @@ import doobie.Transactor
 import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
+import flawless.TestApp
+import flawless.data.Suites
 
-object InitialTests extends IOApp {
+object InitialTests extends IOApp with TestApp {
 
   val transactor = (Blocker[IO], fixedPool(10).map(ExecutionContext.fromExecutorService))
     .tupled
@@ -33,13 +34,13 @@ object InitialTests extends IOApp {
     }
     .widen[Transactor[IO]]
 
-  override def run(args: List[String]): IO[ExitCode] =
-    transactor.use { implicit xa =>
-      val tests =
-        new BasicJoinQueryTests().run
-
-      runTests(args)(Tests.sequence(NonEmptyList.one(tests)))
+  override def run(args: List[String]): IO[ExitCode] = runTests(args) {
+    Suites.resource {
+      transactor.map { implicit xa =>
+        new BasicJoinQueryTests().run.toSuites
+      }
     }
+  }
 
   private def fixedPool(size: Int) =
     Resource.make(IO(Executors.newFixedThreadPool(size)))(ec => IO(ec.shutdown()))
