@@ -1,6 +1,5 @@
 import java.util.concurrent.Executors
 
-import cats.data.NonEmptyList
 import cats.effect.Blocker
 import cats.effect.ExitCode
 import cats.effect.IO
@@ -13,8 +12,10 @@ import doobie.Transactor
 import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
+import flawless.TestApp
+import flawless.data.Suites
 
-object InitialTests extends IOApp {
+object InitialTests extends IOApp with TestApp {
 
   val transactor = (Blocker[IO], fixedPool(10).map(ExecutionContext.fromExecutorService))
     .tupled
@@ -27,19 +28,19 @@ object InitialTests extends IOApp {
             "postgres",
             "postgres",
             boundedEc,
-            blocker.blockingContext
+            blocker
           )
           .evalTap(runMigrations("/init.sql"))
     }
     .widen[Transactor[IO]]
 
-  override def run(args: List[String]): IO[ExitCode] =
-    transactor.use { implicit xa =>
-      val tests =
-        new BasicJoinQueryTests().run
-
-      runTests(args)(Tests.sequence(NonEmptyList.one(tests)))
+  override def run(args: List[String]): IO[ExitCode] = runTests(args) {
+    Suites.resource {
+      transactor.map { implicit xa =>
+        new BasicJoinQueryTests().run.toSuites
+      }
     }
+  }
 
   private def fixedPool(size: Int) =
     Resource.make(IO(Executors.newFixedThreadPool(size)))(ec => IO(ec.shutdown()))
@@ -47,7 +48,7 @@ object InitialTests extends IOApp {
   private def runMigrations(fileName: String)(xa: Transactor[IO])(implicit blocker: Blocker): IO[Unit] = {
     val load = fs2
       .io
-      .readInputStream[IO](IO(getClass.getResourceAsStream(fileName)), 4096, blocker.blockingContext)
+      .readInputStream[IO](IO(getClass.getResourceAsStream(fileName)), 4096, blocker)
       .through(fs2.text.utf8Decode[IO])
       .compile
       .foldMonoid
