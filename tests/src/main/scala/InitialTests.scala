@@ -12,7 +12,8 @@ import doobie.Transactor
 import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
-import flawless.data.neu._
+import flawless.TestApp
+import flawless.data.Suites
 
 object InitialTests extends IOApp with TestApp {
 

@@ -1,8 +1,7 @@
 import doobie.Transactor
 import doobie.implicits._
-import flawless.data.neu.dsl._
-import flawless.data.neu.predicates.all._
-import flawless.data.neu._
+import flawless.dsl._
+import flawless.predicates.all._
 import cats.effect.{test => _, _}
 import cats.implicits._
 import cats.tagless.FunctorK
@@ -11,8 +10,9 @@ import fs2.Pipe
 import cats.Show
 import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
-import com.softwaremill.diffx.DiffResult
-import cats.kernel.Eq
+import flawless.data.Suite
+import flawless.data.Assertion
+import com.softwaremill.diffx.Derived
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -264,7 +264,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val debugOn = false
   def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
-  def expectAllToBe[A[_[_]], Queried: Show](
+  def expectAllToBe[A[_[_]], Queried: Show: Diff](
     q: Query[A, Queried]
   )(
     first: Queried,
@@ -286,7 +286,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
           )
           .pure[NonEmptyList]
       case Right(values) =>
-        implicit val diffQueried: Diff[List[Queried]] = Diff.identical
+        implicit val diffOptionQueried: Diff[Option[Queried]] = Diff.diffForOption[Queried](Derived(Diff[Queried]))
+        implicit val diffListQueried: Diff[List[Queried]] = Diff.diffForIterable[Queried, List](Derived(diffOptionQueried))
 
         ensure(values, equalTo(expectedList))
     }
