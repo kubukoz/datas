@@ -43,7 +43,7 @@ val tests = project
   .settings(
     fork := true,
     libraryDependencies ++= Seq(
-      "com.kubukoz" %% "flawless-core" % "0.1.0-M3",
+      "com.kubukoz" %% "flawless-core" % "0.1.0-M4",
       "com.lihaoyi" %% "pprint" % "0.5.5"
     )
   )

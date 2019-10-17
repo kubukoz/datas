@@ -12,7 +12,6 @@ import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
-import com.softwaremill.diffx.Derived
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -285,11 +284,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
               |Exception message: ${exception.getMessage}""".stripMargin
           )
           .pure[NonEmptyList]
-      case Right(values) =>
-        implicit val diffOptionQueried: Diff[Option[Queried]] = Diff.diffForOption[Queried](Derived(Diff[Queried]))
-        implicit val diffListQueried: Diff[List[Queried]] = Diff.diffForIterable[Queried, List](Derived(diffOptionQueried))
-
-        ensure(values, equalTo(expectedList))
+      case Right(values) => ensure(values, equalTo(expectedList))
     }
   }
 
