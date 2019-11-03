@@ -30,20 +30,13 @@ object datas {
       stClass
         .run(Chain.empty)
         .map {
-          case (_, data) =>
-            TableQuery(QueryBase.FromTable(name, data, FunctorK[F]))
+          case (_, data) => TableQuery.FromTable(name, data, FunctorK[F])
         }
         .value
   }
 
   final case class TableName(name: String) extends AnyVal {
     def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
-  }
-
-  sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
-
-    def compileAsFrom: (Fragment, A[Reference]) =
-      QueryBase.doCompile[A, State[Int, *]](this).runA(0).value
   }
 
   type IndexState[F[_]] = MonadState[F, Int]
@@ -53,19 +46,39 @@ object datas {
     def getAndInc[F[_]: IndexState: Apply]: F[Int] = IndexState[F].get <* IndexState[F].modify(_ + 1)
   }
 
-  object QueryBase {
-    final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], functorK: FunctorK[A]) extends QueryBase[A]
+  sealed trait TableQuery[A[_[_]]] extends Product with Serializable {
+
+    def compileAsFrom: (Fragment, A[Reference]) =
+      TableQuery.doCompile[A, State[Int, *]](this).runA(0).value
+
+    def innerJoin[B[_[_]]](another: TableQuery[B])(onClause: (A[Reference], B[Reference]) => Reference[Boolean]): JoinedTableQuery[A, B] =
+      join(another, "inner join")(onClause)
+
+    def join[B[_[_]]](
+      another: TableQuery[B],
+      kind: JoinKind
+    )(
+      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
+    ): JoinedTableQuery[A, B] =
+      TableQuery.Join(this, another, kind, onClause)
+
+    def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
+      Query(this, selection, filters = Chain.empty)
+  }
+
+  object TableQuery {
+    final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], functorK: FunctorK[A]) extends TableQuery[A]
     final case class Join[A[_[_]], B[_[_]]](
-      left: QueryBase[A],
-      right: QueryBase[B],
+      left: TableQuery[A],
+      right: TableQuery[B],
       kind: JoinKind,
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ) extends QueryBase[Tuple2KK[A, B, *[_]]]
+    ) extends TableQuery[Tuple2KK[A, B, *[_]]]
 
     /**
       * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
       */
-    def doCompile[A[_[_]], F[_]: IndexState: FlatMap](qbase: QueryBase[A]): F[(Fragment, A[Reference])] =
+    def doCompile[A[_[_]], F[_]: IndexState: FlatMap](qbase: TableQuery[A]): F[(Fragment, A[Reference])] =
       qbase match {
         case t: FromTable[t] =>
           implicit val functorK = t.functorK
@@ -95,27 +108,7 @@ object datas {
 
   type JoinedTableQuery[A[_[_]], B[_[_]]] = TableQuery[Tuple2KK[A, B, ?[_]]]
 
-  //todo this class is redundant, should be merged with querybase next
-  final case class TableQuery[A[_[_]]](base: QueryBase[A]) {
-
-    def innerJoin[B[_[_]]](another: TableQuery[B])(onClause: (A[Reference], B[Reference]) => Reference[Boolean]): JoinedTableQuery[A, B] =
-      join(another, "inner join")(onClause)
-
-    def join[B[_[_]]](
-      another: TableQuery[B],
-      kind: JoinKind
-    )(
-      onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): JoinedTableQuery[A, B] =
-      TableQuery(
-        QueryBase.Join(base, another.base, kind, onClause)
-      )
-
-    def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
-      Query(base, selection, filters = Chain.empty)
-  }
-
-  private def setScope(scope: String) = Reference.mapData {
+  private def setScope(scope: String): Reference ~> Reference = Reference.mapData {
     λ[ReferenceData ~> ReferenceData] {
       case ReferenceData.Column(n, None) =>
         ReferenceData.Column(n, Some(scope))
@@ -174,7 +167,7 @@ object datas {
   }
 
   final case class Query[A[_[_]], Queried](
-    base: QueryBase[A],
+    base: TableQuery[A],
     selection: A[Reference] => Reference[Queried],
     filters: Chain[A[Reference] => Reference[Boolean]]
   ) {
