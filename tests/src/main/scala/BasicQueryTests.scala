@@ -12,7 +12,6 @@ import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
-import doobie.util.Read
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -98,18 +97,16 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
       val q =
         userSchema.select(
-          u =>
-            (
-              Reference.lift(true),
-              Reference.lift(Option(5L)),
-              u.age.as(false)
-            ).tupled
+          u => u.age.as(false)
+          // (
+          //   Reference.lift(true),
+          //   Reference.lift(Option(5L)),
+          //   u.age.as(false)
+          // ).tupled
         )
 
       expectAllToBe(q)(
-        (true, Some(5L), false),
-        (true, Some(5L), false),
-        (true, Some(5L), false)
+        List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)).map(_._3): _*
       )
     }
   )
@@ -284,28 +281,26 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val debugOn = false
   def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
-  def expectAllToBe[A[_[_]], Queried: Read: Show: Diff](
+  def expectAllToBe[A[_[_]], Queried: Show: Diff](
     q: Query[A, Queried]
   )(
-    first: Queried,
-    rest: Queried*
+    expectedList: Queried*
   )(
     implicit xa: Transactor[IO]
   ): IO[NonEmptyList[Assertion]] = {
-    val expectedList = first :: rest.toList
     val showQuery = (if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit)
 
     showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
         Assertion
           .Failed(
-            show"""An exception occured, but $expectedList was expected.
+            show"""An exception occured, but ${expectedList.toList} was expected.
               |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
               |Compiled: ${q.compileSql.sql}
               |Exception message: ${exception.getMessage}""".stripMargin
           )
           .pure[NonEmptyList]
-      case Right(values) => ensure(values, equalTo(expectedList))
+      case Right(values) => ensure(values, equalTo(expectedList.toList))
     }
   }
 
@@ -320,7 +315,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
-      (column[Long]("id"), column[Long]("user_id"), column[Option[Long]]("parent_id"), column[String]("name")).mapN(Book[Reference])
+      (column[Long]("id"), column[Long]("user_id"), column[Long]("parent_id").map(Reference.liftOption(_)), column[String]("name"))
+        .mapN(Book[Reference])
     )
 
 }

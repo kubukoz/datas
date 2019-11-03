@@ -14,6 +14,7 @@ import cats.mtl.MonadState
 import cats.mtl.instances.all._
 import cats.FlatMap
 import cats.data.OptionT
+import doobie.postgres.syntax.ToFragmentOps
 
 object datas {
   type ColumnList = List[Column]
@@ -21,10 +22,10 @@ object datas {
   object schemas {
     type ST[X] = State[Chain[Column], X]
 
-    def column[Type: Read](name: String): ST[Reference[Type]] = {
+    def column[Type: Read: Get](name: String): ST[Reference[Type]] = {
       val col = Column(name)
 
-      State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None)))
+      State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None), Get[Type]))
     }
 
     def caseClassSchema[F[_[_]]: FunctorK](name: TableName, stClass: ST[F[Reference]]): TableQuery[F] =
@@ -106,7 +107,7 @@ object datas {
           import j._
           (doCompile[a, F](left), doCompile[b, F](right)).mapN {
             case ((leftFrag, leftCompiledReference), (rightFrag, rightCompiledReference)) =>
-              val thisJoinClause = onClause(leftCompiledReference, rightCompiledReference).compile.frag
+              val thisJoinClause = onClause(leftCompiledReference, rightCompiledReference).compile.compile._1
 
               val joinFrag = leftFrag ++ Fragment.const(kind.kind) ++ rightFrag ++ fr"on" ++ thisJoinClause
 
@@ -176,18 +177,22 @@ object datas {
 
   object Reference {
     final case class Optional[Type](underlying: Reference[Type]) extends Reference[Option[Type]]
-    final case class Single[Type](data: ReferenceData[Type]) extends Reference[Type]
+    final case class Single[Type](data: ReferenceData[Type], getType: Get[Type]) extends Reference[Type]
     final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
     final case class Map[A, B](underlying: Reference[A], f: A => B) extends Reference[B]
 
-    def lift[Type](value: Type)(implicit param: Param[Type HCons HNil]): Reference[Type] =
-      Reference.Single[Type](ReferenceData.Lift(value, param))
+    val liftOption: Reference ~> λ[a => Reference[Option[a]]] = λ[Reference ~> λ[a => Reference[Option[a]]]] {
+      Reference.Optional(_)
+    }
+
+    def lift[Type: Get](value: Type)(implicit param: Param[Type HCons HNil]): Reference[Type] =
+      Reference.Single[Type](ReferenceData.Lift(value, param), Get[Type])
 
     def mapData(fk: ReferenceData ~> ReferenceData): Reference ~> Reference =
       λ[Reference ~> Reference] {
-        case Optional(underlying) => Optional(mapData(fk)(underlying))
-        case Single(data)         => Single(fk(data))
-        case Map(underlying, f)   => Map(mapData(fk)(underlying), f)
+        case Optional(underlying)  => Optional(mapData(fk)(underlying))
+        case Single(data, getType) => Single(fk(data), getType)
+        case Map(underlying, f)    => Map(mapData(fk)(underlying), f)
         case Product(left, right) =>
           Product(mapData(fk)(left), mapData(fk)(right))
       }
@@ -211,16 +216,18 @@ object datas {
     def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
       copy(filters = filters.append(filter))
 
-    def compileSql(implicit read: Read[Queried]): Query0[Queried] = {
+    def compileSql: Query0[Queried] = {
       val (compiledFrom, compiledReference) = base.compileAsFrom
 
-      val compiledSelection = selection(compiledReference).compile
+      val (compiledSelectionFrag, getOrRead) = selection(compiledReference).compile.compile
 
-      val frag = fr"select" ++ compiledSelection.frag ++
+      val frag = fr"select" ++ compiledSelectionFrag ++
         fr"from" ++ compiledFrom ++
         Fragments.whereAnd(
-          filters.map(_.apply(compiledReference).compile.frag).toList: _*
+          filters.map(_.apply(compiledReference).compile.compile._1).toList: _*
         )
+
+      implicit val read: Read[Queried] = getOrRead.fold(Read.fromGet(_), identity)
 
       frag.query[Queried]
     }
@@ -230,36 +237,63 @@ object datas {
     def compileReference: Reference ~> TypedFragment
   }
 
-  final case class TypedFragment[Type](frag: Fragment) {
-    def optional: TypedFragment[Option[Type]] = copy()
-    def map[B](f: Type => B): TypedFragment[B] = copy()
+  sealed trait TypedFragment[Type] extends Product with Serializable {
+    def optional: TypedFragment[Option[Type]] = TypedFragment.Optional(this)
+    def map[B](f: Type => B): TypedFragment[B] = TypedFragment.Map(this, f)
+    def product[B](another: TypedFragment[B]): TypedFragment[(Type, B)] = TypedFragment.Product(this, another)
 
-    def product[B](another: TypedFragment[B]): TypedFragment[(Type, B)] =
-      TypedFragment(frag ++ fr"," ++ another.frag)
+    def compile: (Fragment, Either[Get[Type], Read[Type]]) = TypedFragment.toFragAndGet(this)
+  }
+
+  object TypedFragment {
+
+    def toFragAndGet[Type]: TypedFragment[Type] => (Fragment, Either[Get[Type], Read[Type]]) = {
+      case Single(frag, get) => (frag, get.asLeft)
+      case Optional(underlying) =>
+        toFragAndGet(underlying).map {
+          case Left(get)   => Read.fromGetOption(get).asRight
+          case Right(read) => read.map(_.some).asRight
+        }
+      case p: Product[a, b] =>
+        val (leftFrag, leftGet) = toFragAndGet(p.l)
+        val (rightFrag, rightGet) = toFragAndGet(p.r)
+
+        def toRead[A]: Either[Get[A], Read[A]] => Read[A] = _.fold(Read.fromGet(_), identity)
+
+        val combinedGets: Read[(a, b)] = (leftGet, rightGet).bimap(toRead, toRead).tupled
+
+        (leftFrag ++ fr", " ++ rightFrag, combinedGets.asRight)
+      case Map(underlying, f) => toFragAndGet(underlying).map(_.bimap(_.map(f), _.map(f)))
+    }
+    final case class Single[Type](frag: Fragment, get: Get[Type]) extends TypedFragment[Type]
+    final case class Optional[Type](underlying: TypedFragment[Type]) extends TypedFragment[Option[Type]]
+    final case class Map[A, B](underlying: TypedFragment[A], f: A => B) extends TypedFragment[B]
+    final case class Product[A, B](l: TypedFragment[A], r: TypedFragment[B]) extends TypedFragment[(A, B)]
   }
 
   object ReferenceCompiler {
 
     val default: ReferenceCompiler = new ReferenceCompiler {
-      private def compileData[Type]: ReferenceData[Type] => TypedFragment[Type] = {
+      private def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
         case ReferenceData.Column(column, scope) =>
           val scopeString = scope.foldMap(_ + ".")
-          TypedFragment[Type](
-            Fragment.const(scopeString + "\"" + column.name + "\"")
+          TypedFragment.Single[Type](
+            Fragment.const(scopeString + "\"" + column.name + "\""),
+            getType
           )
         case l: ReferenceData.Lift[a] =>
           implicit val param: Param[a HCons HNil] = l.into
           val _ = param //to make scalac happy
-          TypedFragment[Type](fr"${l.value}")
+          TypedFragment.Single[Type](fr"${l.value}", getType)
         case r: ReferenceData.Raw[a] =>
-          TypedFragment[Type](r.fragment)
+          TypedFragment.Single[Type](r.fragment, getType)
       }
 
       val compileReference: Reference ~> TypedFragment = λ[Reference ~> TypedFragment] {
-        case r: Reference.Optional[a]   => compileReference(r.underlying).optional
-        case Reference.Single(data)     => compileData(data)
-        case m: Reference.Map[a, b]     => compileReference(m.underlying).map(m.f)
-        case p: Reference.Product[a, b] => compileReference(p.left) product compileReference(p.right)
+        case r: Reference.Optional[a]        => compileReference(r.underlying).optional
+        case Reference.Single(data, getType) => compileData(getType)(data)
+        case m: Reference.Map[a, b]          => compileReference(m.underlying).map(m.f)
+        case p: Reference.Product[a, b]      => compileReference(p.left) product compileReference(p.right)
       }
     }
   }
@@ -270,7 +304,7 @@ object datas {
   object OptionTK {
 
     def liftK[F[_[_]]: FunctorK](fg: F[Reference]): OptionTK[F, Reference] = OptionTK(
-      fg.mapK(λ[Reference ~> OptionT[Reference, ?]](g => OptionT(liftOption(g))))
+      fg.mapK(λ[Reference ~> OptionT[Reference, ?]](g => OptionT(Reference.liftOption(g))))
     )
   }
 
@@ -288,14 +322,11 @@ object datas {
   def equalOptionL[Type]: (Reference[Option[Type]], Reference[Type]) => Reference[Boolean] =
     binary(_ ++ fr"=" ++ _)
 
-  val liftOption: Reference ~> λ[a => Reference[Option[a]]] = λ[Reference ~> λ[a => Reference[Option[a]]]] {
-    Reference.Optional(_)
-  }
-
   def notNull[Type]: Reference[Option[Type]] => Reference[Boolean] =
     a =>
       Reference.Single(
-        ReferenceData.Raw(a.compile.frag ++ fr"is not null")
+        ReferenceData.Raw(a.compile.compile._1 ++ fr"is not null"),
+        Get[Boolean]
       )
 
   def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
@@ -303,6 +334,7 @@ object datas {
 
   def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
     Reference.Single(
-      ReferenceData.Raw(f(l.compile.frag, r.compile.frag))
+      ReferenceData.Raw(f(l.compile.compile._1, r.compile.compile._1)),
+      Get[Boolean]
     )
 }
