@@ -12,6 +12,7 @@ import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
+import doobie.util.Read
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -37,7 +38,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
   def run: Suite[IO] =
     suite("BasicQueryTests") {
-      singleTableTests |+| innerJoinTests
+      singleTableTests |+| innerJoinTests |+| leftJoinTests
     }
 
   def singleTableTests = tests(
@@ -241,7 +242,6 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       )
     },
     test("(a join b) join (a join b)") {
-      //todo this needs some more thinking - maybe when compiling "from" don't return lists but trees? identifiers may come in different places than "on" clauses
       val inner = bookSchema.innerJoin(bookSchema) { (b, bP) =>
         equalOptionL(b.parentId, bP.id)
       }
@@ -260,10 +260,31 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     }
   )
 
+  def leftJoinTests = tests(
+    test("left join users and books") {
+      val q = userSchema
+        .leftJoin(bookSchema) { (u, b) =>
+          equal(u.id, b.userId)
+        }
+        .select {
+          _.asTuple match {
+            case (user, book) =>
+              (user.name, book.underlying.name.value).tupled
+          }
+        }
+
+      expectAllToBe(q)(
+        ("Jakub", "Book 1".some),
+        ("John", "Book 2".some),
+        ("Jon", none)
+      )
+    }
+  )
+
   val debugOn = false
   def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
-  def expectAllToBe[A[_[_]], Queried: Show: Diff](
+  def expectAllToBe[A[_[_]], Queried: Read: Show: Diff](
     q: Query[A, Queried]
   )(
     first: Queried,
@@ -299,7 +320,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
-      (column[Long]("id"), column[Long]("user_id"), column[Option[Long]]("parent_id")).mapN(Book[Reference])
+      (column[Long]("id"), column[Long]("user_id"), column[Option[Long]]("parent_id"), column[String]("name")).mapN(Book[Reference])
     )
 
 }
@@ -312,10 +333,12 @@ object User {
   }
 }
 
-final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]])
+final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]], name: F[String])
 
 object Book {
   implicit val functorK: FunctorK[Book] = new FunctorK[Book] {
-    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] = Book(fk(af.id), fk(af.userId), fk(af.parentId))
+
+    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] =
+      Book(id = fk(af.id), userId = fk(af.userId), parentId = fk(af.parentId), name = fk(af.name))
   }
 }
