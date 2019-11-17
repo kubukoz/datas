@@ -14,7 +14,6 @@ import cats.mtl.MonadState
 import cats.mtl.instances.all._
 import cats.FlatMap
 import cats.data.OptionT
-import doobie.postgres.syntax.ToFragmentOps
 
 object datas {
   type ColumnList = List[Column]
@@ -29,12 +28,7 @@ object datas {
     }
 
     def caseClassSchema[F[_[_]]: FunctorK](name: TableName, stClass: ST[F[Reference]]): TableQuery[F] =
-      stClass
-        .run(Chain.empty)
-        .map {
-          case (_, data) => TableQuery.FromTable(name, data, FunctorK[F])
-        }
-        .value
+      stClass.runA(Chain.empty).map(TableQuery.FromTable(name, _, FunctorK[F])).value
   }
 
   final case class TableName(name: String) extends AnyVal {
