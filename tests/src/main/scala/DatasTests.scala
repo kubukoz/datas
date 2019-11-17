@@ -15,7 +15,7 @@ import doobie.implicits._
 import flawless.TestApp
 import flawless.data.Suites
 
-object InitialTests extends IOApp with TestApp {
+object DatasTests extends IOApp with TestApp {
 
   val transactor = (Blocker[IO], fixedPool(10).map(ExecutionContext.fromExecutorService))
     .tupled
