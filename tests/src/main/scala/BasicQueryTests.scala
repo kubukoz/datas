@@ -39,8 +39,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     suite("BasicQueryTests") {
       (
         singleColumnTests
-          |+| singleTableTests.toList.takeWhile(!_.name.contains("STOP")).toNel.get
-        // |+| innerJoinTests |+| leftJoinTests
+          |+| singleTableTests
+          |+| innerJoinTests
+          |+| leftJoinTests
       )
     }
 
