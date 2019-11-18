@@ -51,22 +51,22 @@ object datas {
       another: TableQuery[B]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): TableQuery[JoinKind.Inner[A, B]#Joined] =
+    ): TableQuery[JoinKind.Inner[A, B]#Out] =
       join(another, JoinKind.inner[A, B])(onClause)
 
     def leftJoin[B[_[_]]: FunctorK](
       another: TableQuery[B]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): TableQuery[JoinKind.Left[A, B]#Joined] =
+    ): TableQuery[JoinKind.Left[A, B]#Out] =
       join(another, JoinKind.left[A, B])(onClause)
 
-    def join[B[_[_]]](
+    def join[B[_[_]], Joined[_[_]]](
       another: TableQuery[B],
-      kind: JoinKind[A, B]
+      kind: JoinKind[A, B, Joined]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ): TableQuery[kind.Joined] =
+    ): TableQuery[Joined] =
       TableQuery.Join(this, another, kind, onClause)
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
@@ -75,12 +75,12 @@ object datas {
 
   object TableQuery {
     final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], functorK: FunctorK[A]) extends TableQuery[A]
-    final case class Join[A[_[_]], B[_[_]], K <: JoinKind[A, B]](
+    final case class Join[A[_[_]], B[_[_]], Joined[_[_]]](
       left: TableQuery[A],
       right: TableQuery[B],
-      kind: K,
+      kind: JoinKind[A, B, Joined],
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-    ) extends TableQuery[K#Joined]
+    ) extends TableQuery[Joined]
 
     /**
       * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
@@ -111,30 +111,28 @@ object datas {
 
   }
 
-  trait JoinKind[A[_[_]], B[_[_]]] {
-    type Joined[F[_]]
+  trait JoinKind[A[_[_]], B[_[_]], Joined[_[_]]] {
+    final type Out[F[_]] = Joined[F]
+
     def buildJoined(a: A[Reference], b: B[Reference]): Joined[Reference]
     def kind: String
   }
 
   object JoinKind {
-    type Aux[A[_[_]], B[_[_]], C[_[_]]] = JoinKind[A, B] { type Joined[F[_]] = C[F] }
-    type Inner[A[_[_]], B[_[_]]] = Aux[A, B, Tuple2KK[A, B, ?[_]]]
-    type Left[A[_[_]], B[_[_]]] = Aux[A, B, Tuple2KK[A, OptionTK[B, ?[_]], ?[_]]]
+    type Inner[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, B, ?[_]]]
+    type Left[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, OptionTK[B, ?[_]], ?[_]]]
 
-    def left[A[_[_]], B[_[_]]: FunctorK]: Left[A, B] = new JoinKind[A, B] {
-      type Joined[F[_]] = Tuple2KK[A, OptionTK[B, ?[_]], F]
-      def buildJoined(a: A[Reference], b: B[Reference]): Joined[Reference] = Tuple2KK(a, OptionTK.liftK(b))
-      val kind: String = "left join"
+    def left[A[_[_]], B[_[_]]: FunctorK]: Left[A, B] = make("left join")((a, b) => Tuple2KK(a, OptionTK.liftK(b)))
+    def inner[A[_[_]], B[_[_]]]: Inner[A, B] = make("inner join")(Tuple2KK.apply _)
+
+    private def make[A[_[_]], B[_[_]], Joined[_[_]]](
+      name: String
+    )(
+      build: (A[Reference], B[Reference]) => Joined[Reference]
+    ): JoinKind[A, B, Joined] = new JoinKind[A, B, Joined] {
+      def buildJoined(a: A[Reference], b: B[Reference]): Joined[Reference] = build(a, b)
+      val kind: String = name
     }
-
-    def inner[A[_[_]], B[_[_]]]: Inner[A, B] = new JoinKind[A, B] {
-      type Joined[F[_]] = Tuple2KK[A, B, F]
-
-      def buildJoined(a: A[Reference], b: B[Reference]): Joined[Reference] = Tuple2KK(a, b)
-      val kind: String = "inner join"
-    }
-
   }
 
   private def setScope(scope: String): Reference ~> Reference = Reference.mapData {
