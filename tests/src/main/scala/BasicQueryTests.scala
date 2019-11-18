@@ -20,16 +20,16 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   }
 
   implicit def showTuple9[
-    A: Show,
-    B: Show,
-    C: Show,
-    D: Show,
-    E: Show,
-    F: Show,
-    G: Show,
-    H: Show,
-    I: Show
-  ]: Show[(A, B, C, D, E, F, G, H, I)] = {
+    A1: Show,
+    A2: Show,
+    A3: Show,
+    A4: Show,
+    A5: Show,
+    A6: Show,
+    A7: Show,
+    A8: Show,
+    A9: Show
+  ]: Show[(A1, A2, A3, A4, A5, A6, A7, A8, A9)] = {
     case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
   }
 
@@ -37,11 +37,51 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
   def run: Suite[IO] =
     suite("BasicQueryTests") {
-      singleTableTests |+| innerJoinTests |+| leftJoinTests
+      singleTableTests.toList.takeWhile(!_.name.contains("STOP")).toNel.get // |+| innerJoinTests |+| leftJoinTests
     }
 
   def singleTableTests = tests(
-    test("basic query from single table") {
+    test("select single column from table") {
+      val q = userSchema.select(_.name)
+
+      expectAllToBe(q)("Jon", "Jakub", "John")
+    },
+    test("select second column from table") {
+      val q = userSchema.select(_.age)
+
+      expectAllToBe(q)(36, 23, 40)
+    },
+    test("select + map") {
+      val q = userSchema.select(_.name.map(_ + "X"))
+
+      expectAllToBe(q)("JonX", "JakubX", "JohnX")
+    },
+    test("select lifted constant") {
+      val q = userSchema.select(_ => Reference.lift(1))
+
+      expectAllToBe(q)(1, 1, 1)
+    },
+    test("select lifted + mapped constant") {
+      val q = userSchema.select(_ => Reference.lift(1).map(_ + 1))
+
+      expectAllToBe(q)(2, 2, 2)
+    },
+    test("select option-lifted constant") {
+      val q = userSchema.select(_ => Reference.liftOption(Reference.lift(1)))
+
+      expectAllToBe(q)(1.some, 1.some, 1.some)
+    },
+    test("select equality of same field") {
+      val q = userSchema.select(u => equal(u.name, u.name))
+
+      expectAllToBe(q)(true, true, true)
+    },
+    test("select equality of field with constant") {
+      val q = userSchema.select(u => equal(u.name, Reference.lift("Jon")))
+
+      expectAllToBe(q)(true, false, false)
+    },
+    test("STOP select two columns from single table") {
 
       val q =
         userSchema.select(
@@ -96,14 +136,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     test("querying custom references") {
 
       val q =
-        userSchema.select(
-          u => u.age.as(false)
+        userSchema.select { u =>
+          //todo
           // (
-          //   Reference.lift(true),
-          //   Reference.lift(Option(5L)),
-          //   u.age.as(false)
+          // Reference.lift(true),
+          // Reference.liftOption(Reference.lift(5L)),
+          u.age.as(false)
           // ).tupled
-        )
+        }
 
       expectAllToBe(q)(
         List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)).map(_._3): _*

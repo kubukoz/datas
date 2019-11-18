@@ -21,7 +21,7 @@ object datas {
   object schemas {
     type ST[X] = State[Chain[Column], X]
 
-    def column[Type: Read: Get](name: String): ST[Reference[Type]] = {
+    def column[Type: Get](name: String): ST[Reference[Type]] = {
       val col = Column(name)
 
       State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None), Get[Type]))
