@@ -22,9 +22,9 @@ val compilerPlugins = List(
 
 val commonSettings = Seq(
   scalaVersion := "2.12.10",
-  scalacOptions ++= Options.all,
+  scalacOptions ~= (_.filterNot(_ == "-Xfatal-warnings")),
   name := "datas",
-  updateOptions := updateOptions.value.withGigahorse(false), //may fix publishing bug
+  updateOptions := updateOptions.value.withGigahorse(false),
   libraryDependencies ++= Seq(
     "org.tpolecat" %% "doobie-core" % "0.8.6",
     "org.tpolecat" %% "doobie-postgres" % "0.8.6",
