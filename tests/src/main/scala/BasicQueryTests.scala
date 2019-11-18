@@ -309,7 +309,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   def leftJoinTests = tests(
     test("left join users and books") {
       val q = userSchema
-        .leftJoin(bookSchema) { (u, b) =>
+        .join(bookSchema)(_.left) { (u, b) =>
           equal(u.id, b.userId)
         }
         .select {
@@ -364,7 +364,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
-      (column[Long]("id"), column[Long]("user_id"), column[Long]("parent_id").map(Reference.liftOption(_)), column[String]("name"))
+      (column[Long]("id"), column[Long]("user_id"), column[Long]("parent_id").map(Reference.liftOption), column[String]("name"))
         .mapN(Book[Reference])
     )
 

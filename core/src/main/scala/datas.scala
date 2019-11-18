@@ -49,22 +49,23 @@ object datas {
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): TableQuery[JoinKind.Inner[A, B]#Out] =
-      join(another, JoinKind.inner[A, B])(onClause)
+      join(another)(_.inner)(onClause)
 
     def leftJoin[B[_[_]]: FunctorK](
       another: TableQuery[B]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): TableQuery[JoinKind.Left[A, B]#Out] =
-      join(another, JoinKind.left[A, B])(onClause)
+      join(another)(_.left)(onClause)
 
     def join[B[_[_]], Joined[_[_]]](
-      another: TableQuery[B],
-      kind: JoinKind[A, B, Joined]
+      another: TableQuery[B]
+    )(
+      kindF: JoinKind.type => JoinKind[A, B, Joined]
     )(
       onClause: (A[Reference], B[Reference]) => Reference[Boolean]
     ): TableQuery[Joined] =
-      TableQuery.Join(this, another, kind, onClause)
+      TableQuery.Join(this, another, kindF(JoinKind), onClause)
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(this, selection, filters = Chain.empty)
@@ -97,7 +98,7 @@ object datas {
         import j._
         (doCompile[a, F].apply(left), doCompile[b, F].apply(right)).mapN {
           case ((leftFrag, leftCompiledReference), (rightFrag, rightCompiledReference)) =>
-            val thisJoinClause = onClause(leftCompiledReference, rightCompiledReference).compile.compile._1
+            val (thisJoinClause, _) = onClause(leftCompiledReference, rightCompiledReference).compile
 
             val joinFrag = leftFrag ++ Fragment.const(kind.kind) ++ rightFrag ++ fr"on" ++ thisJoinClause
 
@@ -118,7 +119,7 @@ object datas {
     type Inner[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, B, ?[_]]]
     type Left[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, OptionTK[B, ?[_]], ?[_]]]
 
-    def left[A[_[_]], B[_[_]]: FunctorK]: Left[A, B] = make("left join")((a, b) => Tuple2KK(a, OptionTK.liftK(b)))
+    def left[A[_[_]], B[_[_]]: FunctorK]: Left[A, B] = make("left join")((a, b) => Tuple2KK(a, OptionTK.liftK(b)(Reference.liftOptionK)))
     def inner[A[_[_]], B[_[_]]]: Inner[A, B] = make("inner join")(Tuple2KK.apply _)
 
     private def make[A[_[_]], B[_[_]], Joined[_[_]]](
@@ -155,8 +156,8 @@ object datas {
 
   sealed trait Reference[Type] extends Product with Serializable {
 
-    def compile: TypedFragment[Type] =
-      ReferenceCompiler.compileReference(this)
+    def compile: (Fragment, Either[Get[Type], Read[Type]]) =
+      ReferenceCompiler.compileReference(this).compile
   }
 
   object Reference {
@@ -165,9 +166,9 @@ object datas {
     final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
     final case class Map[A, B](underlying: Reference[A], f: A => B) extends Reference[B]
 
-    val liftOption: Reference ~> λ[a => Reference[Option[a]]] = λ[Reference ~> λ[a => Reference[Option[a]]]] {
-      Reference.Optional(_)
-    }
+    val liftOptionK: Reference ~> OptionT[Reference, ?] = λ[Reference ~> OptionT[Reference, ?]](r => OptionT(Optional(r)))
+
+    def liftOption[Type](reference: Reference[Type]): Reference[Option[Type]] = liftOptionK(reference).value
 
     def lift[Type: Get](value: Type)(implicit param: Param[Type HCons HNil]): Reference[Type] =
       Reference.Single[Type](ReferenceData.Lift(value, param), Get[Type])
@@ -203,12 +204,12 @@ object datas {
     def compileSql: Query0[Queried] = {
       val (compiledQueryBase, compiledReference) = TableQuery.doCompile[A, State[Int, *]].apply(base).runA(0).value
 
-      val (compiledSelectionFrag, getOrRead) = selection(compiledReference).compile.compile
+      val (compiledSelectionFrag, getOrRead) = selection(compiledReference).compile
 
       val frag = fr"select" ++ compiledSelectionFrag ++
         fr"from" ++ compiledQueryBase ++
         Fragments.whereAnd(
-          filters.map(_.apply(compiledReference).compile.compile._1).toList: _*
+          filters.map(_.apply(compiledReference).compile._1).toList: _*
         )
 
       implicit val read: Read[Queried] = getOrRead.fold(Read.fromGet(_), identity)
@@ -272,8 +273,8 @@ object datas {
     }
 
     val compileReference: Reference ~> TypedFragment = λ[Reference ~> TypedFragment] {
-      case r: Reference.Optional[a]        => compileReference(r.underlying).optional
       case Reference.Single(data, getType) => compileData(getType)(data)
+      case r: Reference.Optional[a]        => compileReference(r.underlying).optional
       case m: Reference.Map[a, b]          => compileReference(m.underlying).map(m.f)
       case p: Reference.Product[a, b]      => compileReference(p.left) product compileReference(p.right)
     }
@@ -283,10 +284,7 @@ object datas {
   case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, ?]])
 
   object OptionTK {
-
-    def liftK[F[_[_]]: FunctorK](fg: F[Reference]): OptionTK[F, Reference] = OptionTK(
-      fg.mapK(λ[Reference ~> OptionT[Reference, ?]](g => OptionT(Reference.liftOption(g))))
-    )
+    def liftK[F[_[_]]: FunctorK, G[_]](fg: F[G])(lift: G ~> OptionT[G, ?]): OptionTK[F, G] = OptionTK(fg.mapK(lift))
   }
 
   //A tuple2 of even-higher-kinded types.
@@ -303,19 +301,18 @@ object datas {
   def equalOptionL[Type]: (Reference[Option[Type]], Reference[Type]) => Reference[Boolean] =
     binary(_ ++ fr"=" ++ _)
 
-  def notNull[Type]: Reference[Option[Type]] => Reference[Boolean] =
-    a =>
-      Reference.Single(
-        ReferenceData.Raw(a.compile.compile._1 ++ fr"is not null"),
-        Get[Boolean]
-      )
+  def notNull[Type](a: Reference[Option[Type]]): Reference[Boolean] =
+    Reference.Single(
+      ReferenceData.Raw(a.compile._1 ++ fr"is not null"),
+      Get[Boolean]
+    )
 
   def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
     binary(_ ++ fr"<>" ++ _)
 
   def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
     Reference.Single(
-      ReferenceData.Raw(f(l.compile.compile._1, r.compile.compile._1)),
+      ReferenceData.Raw(f(l.compile._1, r.compile._1)),
       Get[Boolean]
     )
 }
