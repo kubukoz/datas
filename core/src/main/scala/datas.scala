@@ -249,14 +249,15 @@ object datas {
           case Right(read) => read.map(_.some).asRight
         }
       case p: Product[a, b] =>
-        val (leftFrag, leftGet) = toFragAndGet(p.l)
-        val (rightFrag, rightGet) = toFragAndGet(p.r)
-
         def toRead[A]: Either[Get[A], Read[A]] => Read[A] = _.fold(Read.fromGet(_), identity)
 
-        val combinedGets: Read[(a, b)] = (leftGet, rightGet).bimap(toRead, toRead).tupled
+        val (leftFrag, leftRead) = toFragAndGet(p.l).map(toRead)
+        val (rightFrag, rightRead) = toFragAndGet(p.r).map(toRead)
 
-        (leftFrag ++ fr", " ++ rightFrag, combinedGets.asRight)
+        implicit val lR = leftRead
+        implicit val rR = rightRead
+
+        (leftFrag ++ fr", " ++ rightFrag, Read[(a, b)].asRight)
       case Map(underlying, f) => toFragAndGet(underlying).map(_.bimap(_.map(f), _.map(f)))
     }
     final case class Single[Type](frag: Fragment, get: Get[Type]) extends TypedFragment[Type]

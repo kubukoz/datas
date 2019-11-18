@@ -107,7 +107,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
           ("John", 40)
         )
       },
-      test("STOP querying equalities") {
+      test("querying equalities") {
 
         val q =
           userSchema.select(
@@ -146,16 +146,15 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
         val q =
           userSchema.select { u =>
-            //todo
-            // (
-            // Reference.lift(true),
-            // Reference.liftOption(Reference.lift(5L)),
-            u.age.as(false)
-            // ).tupled
+            (
+              Reference.lift(true),
+              Reference.liftOption(Reference.lift(5L)),
+              u.age.as(false)
+            ).tupled
           }
 
         expectAllToBe(q)(
-          List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)).map(_._3): _*
+          List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)): _*
         )
       }
     )
