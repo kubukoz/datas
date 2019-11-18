@@ -37,119 +37,128 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
   def run: Suite[IO] =
     suite("BasicQueryTests") {
-      singleTableTests.toList.takeWhile(!_.name.contains("STOP")).toNel.get // |+| innerJoinTests |+| leftJoinTests
+      (
+        singleColumnTests
+          |+| singleTableTests.toList.takeWhile(!_.name.contains("STOP")).toNel.get
+        // |+| innerJoinTests |+| leftJoinTests
+      )
     }
 
-  def singleTableTests = tests(
-    test("select single column from table") {
-      val q = userSchema.select(_.name)
+  def singleColumnTests =
+    tests(
+      test("select single column from table") {
+        val q = userSchema.select(_.name)
 
-      expectAllToBe(q)("Jon", "Jakub", "John")
-    },
-    test("select second column from table") {
-      val q = userSchema.select(_.age)
+        expectAllToBe(q)("Jon", "Jakub", "John")
+      },
+      test("select second column from table") {
+        val q = userSchema.select(_.age)
 
-      expectAllToBe(q)(36, 23, 40)
-    },
-    test("select + map") {
-      val q = userSchema.select(_.name.map(_ + "X"))
+        expectAllToBe(q)(36, 23, 40)
+      },
+      test("select + map") {
+        val q = userSchema.select(_.name.map(_ + "X"))
 
-      expectAllToBe(q)("JonX", "JakubX", "JohnX")
-    },
-    test("select lifted constant") {
-      val q = userSchema.select(_ => Reference.lift(1))
+        expectAllToBe(q)("JonX", "JakubX", "JohnX")
+      },
+      test("select lifted constant") {
+        val q = userSchema.select(_ => Reference.lift(1))
 
-      expectAllToBe(q)(1, 1, 1)
-    },
-    test("select lifted + mapped constant") {
-      val q = userSchema.select(_ => Reference.lift(1).map(_ + 1))
+        expectAllToBe(q)(1, 1, 1)
+      },
+      test("select lifted + mapped constant") {
+        val q = userSchema.select(_ => Reference.lift(1).map(_ + 1))
 
-      expectAllToBe(q)(2, 2, 2)
-    },
-    test("select option-lifted constant") {
-      val q = userSchema.select(_ => Reference.liftOption(Reference.lift(1)))
+        expectAllToBe(q)(2, 2, 2)
+      },
+      test("select option-lifted constant") {
+        val q = userSchema.select(_ => Reference.liftOption(Reference.lift(1)))
 
-      expectAllToBe(q)(1.some, 1.some, 1.some)
-    },
-    test("select equality of same field") {
-      val q = userSchema.select(u => equal(u.name, u.name))
+        expectAllToBe(q)(1.some, 1.some, 1.some)
+      },
+      test("select equality of same field") {
+        val q = userSchema.select(u => equal(u.name, u.name))
 
-      expectAllToBe(q)(true, true, true)
-    },
-    test("select equality of field with constant") {
-      val q = userSchema.select(u => equal(u.name, Reference.lift("Jon")))
+        expectAllToBe(q)(true, true, true)
+      },
+      test("select equality of field with constant") {
+        val q = userSchema.select(u => equal(u.name, Reference.lift("Jon")))
 
-      expectAllToBe(q)(true, false, false)
-    },
-    test("STOP select two columns from single table") {
+        expectAllToBe(q)(true, false, false)
+      }
+    )
 
-      val q =
-        userSchema.select(
-          u =>
-            (
-              u.name,
-              u.age
-            ).tupled
-        )
+  def singleTableTests =
+    tests(
+      test("select two columns from single table") {
 
-      expectAllToBe(q)(
-        ("Jon", 36),
-        ("Jakub", 23),
-        ("John", 40)
-      )
-    },
-    test("querying equalities") {
-
-      val q =
-        userSchema.select(
-          u =>
-            (
-              equal(u.age, Reference.lift(23)),
-              equal(Reference.lift(5), Reference.lift(10))
-            ).tupled
-        )
-
-      expectAllToBe(q)(
-        (false, false),
-        (true, false),
-        (false, false)
-      )
-    },
-    test("conditions in queries") {
-
-      val q =
-        userSchema
-          .select(
+        val q =
+          userSchema.select(
             u =>
               (
                 u.name,
                 u.age
               ).tupled
           )
-          .where(u => over(u.age, Reference.lift(24)))
-          .where(u => nonEqual(u.name, Reference.lift("John")))
 
-      expectAllToBe(q)(
-        ("Jon", 36)
-      )
-    },
-    test("querying custom references") {
+        expectAllToBe(q)(
+          ("Jon", 36),
+          ("Jakub", 23),
+          ("John", 40)
+        )
+      },
+      test("STOP querying equalities") {
 
-      val q =
-        userSchema.select { u =>
-          //todo
-          // (
-          // Reference.lift(true),
-          // Reference.liftOption(Reference.lift(5L)),
-          u.age.as(false)
-          // ).tupled
-        }
+        val q =
+          userSchema.select(
+            u =>
+              (
+                equal(u.age, Reference.lift(23)),
+                equal(Reference.lift(5), Reference.lift(10))
+              ).tupled
+          )
 
-      expectAllToBe(q)(
-        List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)).map(_._3): _*
-      )
-    }
-  )
+        expectAllToBe(q)(
+          (false, false),
+          (true, false),
+          (false, false)
+        )
+      },
+      test("conditions in queries") {
+
+        val q =
+          userSchema
+            .select(
+              u =>
+                (
+                  u.name,
+                  u.age
+                ).tupled
+            )
+            .where(u => over(u.age, Reference.lift(24)))
+            .where(u => nonEqual(u.name, Reference.lift("John")))
+
+        expectAllToBe(q)(
+          ("Jon", 36)
+        )
+      },
+      test("querying custom references") {
+
+        val q =
+          userSchema.select { u =>
+            //todo
+            // (
+            // Reference.lift(true),
+            // Reference.liftOption(Reference.lift(5L)),
+            u.age.as(false)
+            // ).tupled
+          }
+
+        expectAllToBe(q)(
+          List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)).map(_._3): _*
+        )
+      }
+    )
 
   def innerJoinTests = tests(
     test("inner join users and books") {
