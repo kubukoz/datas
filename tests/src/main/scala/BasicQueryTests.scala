@@ -157,6 +157,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         expectAllToBe(q)(
           List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)): _*
         )
+      },
+      test("select all from user") {
+        val q = userSchema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
+
+        expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
       }
     )
 
@@ -324,11 +329,6 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         ("John", "Book 2".some),
         ("Jon", none)
       )
-    },
-    test("select all from user") {
-      val q = userSchema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
-
-      expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
     }
   )
 
