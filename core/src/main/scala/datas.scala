@@ -27,8 +27,13 @@ object datas {
       State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None), Get[Type]))
     }
 
-    def caseClassSchema[F[_[_]]: FunctorK](name: TableName, stClass: ST[F[Reference]]): TableQuery[F] =
-      stClass.runA(Chain.empty).map(TableQuery.FromTable(name, _, FunctorK[F])).value
+    def caseClassSchema[F[_[_]]: FunctorK](
+      name: TableName,
+      stClass: ST[F[Reference]]
+    )(
+      unwrap: F[Reference] => Reference[F[cats.Id]]
+    ): TableQuery[F] =
+      stClass.runA(Chain.empty).map(w => TableQuery.FromTable(name, w, FunctorK[F], unwrap)).value
   }
 
   final case class TableName(name: String) extends AnyVal {
@@ -67,12 +72,19 @@ object datas {
     ): TableQuery[Joined] =
       TableQuery.Join(this, another, kindF(JoinKind), onClause)
 
+    def selectAll: Query[A, A[cats.Id]] = select(aref => this.asInstanceOf[TableQuery.FromTable[A]].unwrap(aref))
+
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(this, selection, filters = Chain.empty)
   }
 
   private[datas] object TableQuery {
-    final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], functorK: FunctorK[A]) extends TableQuery[A]
+    final case class FromTable[A[_[_]]](
+      table: TableName,
+      lifted: A[Reference],
+      functorK: FunctorK[A],
+      unwrap: A[Reference] => Reference[A[cats.Id]]
+    ) extends TableQuery[A]
     final case class Join[A[_[_]], B[_[_]], Joined[_[_]]](
       left: TableQuery[A],
       right: TableQuery[B],

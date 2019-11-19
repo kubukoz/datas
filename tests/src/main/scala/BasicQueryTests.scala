@@ -324,6 +324,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         ("John", "Book 2".some),
         ("Jon", none)
       )
+    },
+    test("select all from user") {
+      val q = userSchema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
+
+      expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
     }
   )
 
@@ -359,15 +364,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     caseClassSchema(
       TableName("users"),
       (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference])
-    )
+    )(User.unapply[Reference](_).get.mapN(User[cats.Id] _))
 
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
       (column[Long]("id"), column[Long]("user_id"), column[Long]("parent_id").map(Reference.liftOption), column[String]("name"))
         .mapN(Book[Reference])
-    )
-
+    )(Book.unapply[Reference](_).get.mapN(Book[cats.Id] _))
 }
 
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
@@ -376,6 +380,8 @@ object User {
   implicit val functorK: FunctorK[User] = new FunctorK[User] {
     def mapK[F[_], G[_]](af: User[F])(fk: F ~> G): User[G] = User(fk(af.id), fk(af.name), fk(af.age))
   }
+
+  implicit val showId: Show[User[cats.Id]] = Show.fromToString
 }
 
 final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]], name: F[String])
