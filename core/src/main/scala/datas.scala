@@ -98,7 +98,7 @@ object datas {
         import j._
         (doCompile[a, F].apply(left), doCompile[b, F].apply(right)).mapN {
           case ((leftFrag, leftCompiledReference), (rightFrag, rightCompiledReference)) =>
-            val (thisJoinClause, _) = onClause(leftCompiledReference, rightCompiledReference).compile
+            val thisJoinClause = onClause(leftCompiledReference, rightCompiledReference).compile.frag
 
             val joinFrag = leftFrag ++ Fragment.const(kind.kind) ++ rightFrag ++ fr"on" ++ thisJoinClause
 
@@ -156,8 +156,8 @@ object datas {
 
   sealed trait Reference[Type] extends Product with Serializable {
 
-    def compile: (Fragment, Either[Get[Type], Read[Type]]) =
-      ReferenceCompiler.compileReference(this).compile
+    private[datas] def compile: CompiledReference[Type] =
+      ReferenceCompiler.compileReference(this)
   }
 
   object Reference {
@@ -204,79 +204,69 @@ object datas {
     def compileSql: Query0[Queried] = {
       val (compiledQueryBase, compiledReference) = TableQuery.doCompile[A, State[Int, *]].apply(base).runA(0).value
 
-      val (compiledSelectionFrag, getOrRead) = selection(compiledReference).compile
+      val compiledSelection = selection(compiledReference).compile
 
-      val frag = fr"select" ++ compiledSelectionFrag ++
+      val frag = fr"select" ++ compiledSelection.frag ++
         fr"from" ++ compiledQueryBase ++
         Fragments.whereAnd(
-          filters.map(_.apply(compiledReference).compile._1).toList: _*
+          filters.map(_.apply(compiledReference).compile.frag).toList: _*
         )
 
-      implicit val read: Read[Queried] = getOrRead.fold(Read.fromGet(_), identity)
+      implicit val read: Read[Queried] = compiledSelection.readOrGet.fold(Read.fromGet(_), identity)
 
       frag.query[Queried]
     }
   }
 
-  sealed trait TypedFragment[Type] extends Product with Serializable {
-    def optional: TypedFragment[Option[Type]] = TypedFragment.Optional(this)
-    def map[B](f: Type => B): TypedFragment[B] = TypedFragment.Map(this, f)
-    def product[B](another: TypedFragment[B]): TypedFragment[(Type, B)] = TypedFragment.Product(this, another)
+  private[datas] final case class CompiledReference[Type](frag: Fragment, readOrGet: Either[Get[Type], Read[Type]]) {
+    def rmap[T2](f: Either[Get[Type], Read[Type]] => T2): (Fragment, T2) = (frag, f(readOrGet))
 
-    def compile: (Fragment, Either[Get[Type], Read[Type]]) = TypedFragment.toFragAndGet(this)
+    def ermap[T2](f: Either[Get[Type], Read[Type]] => Either[Get[T2], Read[T2]]): CompiledReference[T2] =
+      CompiledReference(frag, f(readOrGet))
+
+    def mapBoth[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
   }
 
-  object TypedFragment {
+  private object ReferenceCompiler {
 
-    def toFragAndGet[Type]: TypedFragment[Type] => (Fragment, Either[Get[Type], Read[Type]]) = {
-      case Single(frag, get) => (frag, get.asLeft)
-      case Optional(underlying) =>
-        toFragAndGet(underlying).map {
+    final case class TypedFragment[Type](fragment: Fragment, get: Get[Type])
+
+    def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
+      case ReferenceData.Column(column, scope) =>
+        val scopeString = scope.foldMap(_ + ".")
+        TypedFragment(Fragment.const(scopeString + "\"" + column.name + "\""), getType)
+      case l: ReferenceData.Lift[a] =>
+        implicit val param: Param[a HCons HNil] = l.into
+        val _ = param //to make scalac happy
+        TypedFragment(fr"${l.value}", getType)
+      case r: ReferenceData.Raw[a] => TypedFragment(r.fragment, getType)
+    }
+
+    val compileReference: Reference ~> CompiledReference = λ[Reference ~> CompiledReference] {
+      case Reference.Single(data, getType) =>
+        val tf = compileData(getType)(data)
+        CompiledReference(tf.fragment, tf.get.asLeft)
+
+      case r: Reference.Optional[a] =>
+        compileReference(r.underlying).ermap {
           case Left(get)   => Read.fromGetOption(get).asRight
           case Right(read) => read.map(_.some).asRight
         }
-      case p: Product[a, b] =>
+
+      case m: Reference.Map[a, b] => compileReference(m.underlying).mapBoth(m.f)
+
+      case p: Reference.Product[a, b] =>
         def toRead[A]: Either[Get[A], Read[A]] => Read[A] = _.fold(Read.fromGet(_), identity)
 
-        val (leftFrag, leftRead) = toFragAndGet(p.l).map(toRead)
-        val (rightFrag, rightRead) = toFragAndGet(p.r).map(toRead)
+        val (leftFrag, leftRead) = compileReference(p.left).rmap(toRead)
+        val (rightFrag, rightRead) = compileReference(p.right).rmap(toRead)
 
         implicit val lR = leftRead
         implicit val rR = rightRead
 
         val _ = (lR, rR) //making scalac happy
 
-        (leftFrag ++ fr", " ++ rightFrag, Read[(a, b)].asRight)
-      case Map(underlying, f) => toFragAndGet(underlying).map(_.bimap(_.map(f), _.map(f)))
-    }
-    final case class Single[Type](frag: Fragment, get: Get[Type]) extends TypedFragment[Type]
-    final case class Optional[Type](underlying: TypedFragment[Type]) extends TypedFragment[Option[Type]]
-    final case class Map[A, B](underlying: TypedFragment[A], f: A => B) extends TypedFragment[B]
-    final case class Product[A, B](l: TypedFragment[A], r: TypedFragment[B]) extends TypedFragment[(A, B)]
-  }
-
-  private[datas] object ReferenceCompiler {
-
-    def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
-      case ReferenceData.Column(column, scope) =>
-        val scopeString = scope.foldMap(_ + ".")
-        TypedFragment.Single[Type](
-          Fragment.const(scopeString + "\"" + column.name + "\""),
-          getType
-        )
-      case l: ReferenceData.Lift[a] =>
-        implicit val param: Param[a HCons HNil] = l.into
-        val _ = param //to make scalac happy
-        TypedFragment.Single[Type](fr"${l.value}", getType)
-      case r: ReferenceData.Raw[a] =>
-        TypedFragment.Single[Type](r.fragment, getType)
-    }
-
-    val compileReference: Reference ~> TypedFragment = λ[Reference ~> TypedFragment] {
-      case Reference.Single(data, getType) => compileData(getType)(data)
-      case r: Reference.Optional[a]        => compileReference(r.underlying).optional
-      case m: Reference.Map[a, b]          => compileReference(m.underlying).map(m.f)
-      case p: Reference.Product[a, b]      => compileReference(p.left) product compileReference(p.right)
+        CompiledReference(leftFrag ++ fr", " ++ rightFrag, Read[(a, b)].asRight)
     }
   }
 
@@ -303,7 +293,7 @@ object datas {
 
   def notNull[Type](a: Reference[Option[Type]]): Reference[Boolean] =
     Reference.Single(
-      ReferenceData.Raw(a.compile._1 ++ fr"is not null"),
+      ReferenceData.Raw(a.compile.frag ++ fr"is not null"),
       Get[Boolean]
     )
 
@@ -312,7 +302,7 @@ object datas {
 
   def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
     Reference.Single(
-      ReferenceData.Raw(f(l.compile._1, r.compile._1)),
+      ReferenceData.Raw(f(l.compile.frag, r.compile.frag)),
       Get[Boolean]
     )
 }
