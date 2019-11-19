@@ -83,7 +83,7 @@ object datas {
     /**
       * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
       */
-    def doCompile[A[_[_]], F[_]: IndexState: FlatMap]: TableQuery[A] => F[(Fragment, A[Reference])] = {
+    def compileQuery[A[_[_]], F[_]: IndexState: FlatMap]: TableQuery[A] => F[(Fragment, A[Reference])] = {
       case t: FromTable[t] =>
         implicit val functorK = t.functorK
         IndexState.getAndInc[F].map { index =>
@@ -96,7 +96,7 @@ object datas {
 
       case j: Join[a, b, k] =>
         import j._
-        (doCompile[a, F].apply(left), doCompile[b, F].apply(right)).mapN {
+        (compileQuery[a, F].apply(left), compileQuery[b, F].apply(right)).mapN {
           case ((leftFrag, leftCompiledReference), (rightFrag, rightCompiledReference)) =>
             val thisJoinClause = onClause(leftCompiledReference, rightCompiledReference).compile.frag
 
@@ -152,12 +152,25 @@ object datas {
     final case class Column[A](col: datas.Column, scope: Option[String]) extends ReferenceData[A]
     final case class Lift[Type](value: Type, into: Param[Type HCons HNil]) extends ReferenceData[Type]
     final case class Raw[Type](fragment: Fragment) extends ReferenceData[Type]
+
+    private[datas] def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
+      case ReferenceData.Column(column, scope) =>
+        val scopeString = scope.foldMap(_ + ".")
+        TypedFragment(Fragment.const(scopeString + "\"" + column.name + "\""), getType)
+      case l: ReferenceData.Lift[a] =>
+        implicit val param: Param[a HCons HNil] = l.into
+        val _ = param //to make scalac happy
+        TypedFragment(fr"${l.value}", getType)
+      case r: ReferenceData.Raw[a] => TypedFragment(r.fragment, getType)
+    }
+
+    final case class TypedFragment[Type](fragment: Fragment, get: Get[Type])
   }
 
   sealed trait Reference[Type] extends Product with Serializable {
 
     private[datas] def compile: CompiledReference[Type] =
-      ReferenceCompiler.compileReference(this)
+      Reference.compileReference(this)
   }
 
   object Reference {
@@ -175,76 +188,21 @@ object datas {
 
     def mapData(fk: ReferenceData ~> ReferenceData): Reference ~> Reference =
       λ[Reference ~> Reference] {
-        case Optional(underlying)  => Optional(mapData(fk)(underlying))
         case Single(data, getType) => Single(fk(data), getType)
+        case Optional(underlying)  => Optional(mapData(fk)(underlying))
         case Map(underlying, f)    => Map(mapData(fk)(underlying), f)
-        case Product(left, right) =>
-          Product(mapData(fk)(left), mapData(fk)(right))
+        case Product(left, right)  => Product(mapData(fk)(left), mapData(fk)(right))
       }
 
     implicit val apply: Apply[Reference] = new Apply[Reference] {
-      def map[A, B](fa: Reference[A])(f: A => B): Reference[B] = Map(fa, f)
-
-      def ap[A, B](ff: Reference[A => B])(fa: Reference[A]): Reference[B] =
-        product(ff, fa).map { case (f, a) => f(a) }
-      override def product[A, B](fa: Reference[A], fb: Reference[B]): Reference[(A, B)] =
-        Reference.Product(fa, fb)
-    }
-  }
-
-  final case class Query[A[_[_]], Queried](
-    base: TableQuery[A],
-    selection: A[Reference] => Reference[Queried],
-    filters: Chain[A[Reference] => Reference[Boolean]]
-  ) {
-
-    def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
-      copy(filters = filters.append(filter))
-
-    def compileSql: Query0[Queried] = {
-      val (compiledQueryBase, compiledReference) = TableQuery.doCompile[A, State[Int, *]].apply(base).runA(0).value
-
-      val compiledSelection = selection(compiledReference).compile
-
-      val frag = fr"select" ++ compiledSelection.frag ++
-        fr"from" ++ compiledQueryBase ++
-        Fragments.whereAnd(
-          filters.map(_.apply(compiledReference).compile.frag).toList: _*
-        )
-
-      implicit val read: Read[Queried] = compiledSelection.readOrGet.fold(Read.fromGet(_), identity)
-
-      frag.query[Queried]
-    }
-  }
-
-  private[datas] final case class CompiledReference[Type](frag: Fragment, readOrGet: Either[Get[Type], Read[Type]]) {
-    def rmap[T2](f: Either[Get[Type], Read[Type]] => T2): (Fragment, T2) = (frag, f(readOrGet))
-
-    def ermap[T2](f: Either[Get[Type], Read[Type]] => Either[Get[T2], Read[T2]]): CompiledReference[T2] =
-      CompiledReference(frag, f(readOrGet))
-
-    def mapBoth[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
-  }
-
-  private object ReferenceCompiler {
-
-    final case class TypedFragment[Type](fragment: Fragment, get: Get[Type])
-
-    def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
-      case ReferenceData.Column(column, scope) =>
-        val scopeString = scope.foldMap(_ + ".")
-        TypedFragment(Fragment.const(scopeString + "\"" + column.name + "\""), getType)
-      case l: ReferenceData.Lift[a] =>
-        implicit val param: Param[a HCons HNil] = l.into
-        val _ = param //to make scalac happy
-        TypedFragment(fr"${l.value}", getType)
-      case r: ReferenceData.Raw[a] => TypedFragment(r.fragment, getType)
+      override def map[A, B](fa: Reference[A])(f: A => B): Reference[B] = Map(fa, f)
+      override def ap[A, B](ff: Reference[A => B])(fa: Reference[A]): Reference[B] = product(ff, fa).map { case (f, a) => f(a) }
+      override def product[A, B](fa: Reference[A], fb: Reference[B]): Reference[(A, B)] = Reference.Product(fa, fb)
     }
 
-    val compileReference: Reference ~> CompiledReference = λ[Reference ~> CompiledReference] {
+    private[datas] val compileReference: Reference ~> CompiledReference = λ[Reference ~> CompiledReference] {
       case Reference.Single(data, getType) =>
-        val tf = compileData(getType)(data)
+        val tf = ReferenceData.compileData(getType)(data)
         CompiledReference(tf.fragment, tf.get.asLeft)
 
       case r: Reference.Optional[a] =>
@@ -268,6 +226,41 @@ object datas {
 
         CompiledReference(leftFrag ++ fr", " ++ rightFrag, Read[(a, b)].asRight)
     }
+  }
+
+  final case class Query[A[_[_]], Queried](
+    base: TableQuery[A],
+    selection: A[Reference] => Reference[Queried],
+    filters: Chain[A[Reference] => Reference[Boolean]]
+  ) {
+
+    def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
+      copy(filters = filters.append(filter))
+
+    def compileSql: Query0[Queried] = {
+      val (compiledQueryBase, compiledReference) = TableQuery.compileQuery[A, State[Int, *]].apply(base).runA(0).value
+
+      val compiledSelection = selection(compiledReference).compile
+
+      val frag = fr"select" ++ compiledSelection.frag ++
+        fr"from" ++ compiledQueryBase ++
+        Fragments.whereAnd(
+          filters.map(_.apply(compiledReference).compile.frag).toList: _*
+        )
+
+      implicit val read: Read[Queried] = compiledSelection.readOrGet.fold(Read.fromGet(_), identity)
+
+      frag.query[Queried]
+    }
+  }
+
+  private[datas] final case class CompiledReference[Type](frag: Fragment, readOrGet: Either[Get[Type], Read[Type]]) {
+    def rmap[T2](f: Either[Get[Type], Read[Type]] => T2): (Fragment, T2) = (frag, f(readOrGet))
+
+    def ermap[T2](f: Either[Get[Type], Read[Type]] => Either[Get[T2], Read[T2]]): CompiledReference[T2] =
+      CompiledReference(frag, f(readOrGet))
+
+    def mapBoth[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
   }
 
   //A *->*->* -kinded option transformer
