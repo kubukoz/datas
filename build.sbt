@@ -26,9 +26,9 @@ val commonSettings = Seq(
   name := "datas",
   updateOptions := updateOptions.value.withGigahorse(false),
   libraryDependencies ++= Seq(
-    "org.tpolecat" %% "doobie-core" % "0.8.7",
-    "org.tpolecat" %% "doobie-postgres" % "0.8.7",
-    "org.tpolecat" %% "doobie-hikari" % "0.8.7",
+    "org.tpolecat" %% "doobie-core" % "0.8.8",
+    "org.tpolecat" %% "doobie-postgres" % "0.8.8",
+    "org.tpolecat" %% "doobie-hikari" % "0.8.8",
     "org.typelevel" %% "cats-effect" % "2.0.0",
     "org.typelevel" %% "cats-tagless-macros" % "0.10",
     "org.typelevel" %% "cats-mtl-core" % "0.7.0"
