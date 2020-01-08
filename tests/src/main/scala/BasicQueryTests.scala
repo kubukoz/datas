@@ -368,27 +368,19 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val userSchema: TableQuery[User] =
     caseClassSchema(
       TableName("users"),
-      User
-        .sequenceK
-        .sequence[ST, Reference](
-          User[λ[a => ST[Reference[a]]]](column[Long]("id"), column[String]("name"), column[Int]("age"))
-        )
-    )(User.sequenceK.sequence[Reference, cats.Id](_))
+      User[STRef](column[Long]("id"), column[String]("name"), column[Int]("age"))
+    )
 
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
-      Book
-        .sequenceK
-        .sequence[ST, Reference](
-          Book[λ[a => ST[Reference[a]]]](
-            column[Long]("id"),
-            column[Long]("user_id"),
-            column[Long]("parent_id").map(Reference.liftOption),
-            column[String]("name")
-          )
-        )
-    )(Book.sequenceK.sequence[Reference, cats.Id](_))
+      Book[STRef](
+        column[Long]("id"),
+        column[Long]("user_id"),
+        column[Long]("parent_id").map(Reference.liftOption),
+        column[String]("name")
+      )
+    )
 }
 
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])

@@ -25,20 +25,20 @@ object datas {
 
   object schemas {
     type ST[X] = State[Chain[Column], X]
+    type STRef[X] = ST[Reference[X]]
 
-    def column[Type: Get](name: String): ST[Reference[Type]] = {
+    def column[Type: Get](name: String): STRef[Type] = {
       val col = Column(name)
 
       State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None), Get[Type]))
     }
 
-    def caseClassSchema[F[_[_]]: FunctorK](
-      name: TableName,
-      stClass: ST[F[Reference]]
-    )(
-      unwrap: F[Reference] => Reference[F[cats.Id]]
-    ): TableQuery[F] =
-      stClass.runA(Chain.empty).map(w => TableQuery.FromTable(name, w, FunctorK[F], unwrap)).value
+    def caseClassSchema[F[_[_]]: FunctorK: SequenceK](name: TableName, stClass: F[STRef]): TableQuery[F] =
+      implicitly[SequenceK[F]]
+        .sequence(stClass)
+        .runA(Chain.empty)
+        .map(w => TableQuery.FromTable(name, w, FunctorK[F], implicitly[SequenceK[F]].sequence[Reference, cats.Id]))
+        .value
   }
 
   final case class TableName(name: String) extends AnyVal {
