@@ -162,7 +162,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         val q = userSchema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
-      }
+      },
     )
 
   def innerJoinTests = tests(

@@ -156,7 +156,9 @@ object datas {
     }
   }
 
-  final case class Column(name: String) extends AnyVal
+  final case class Column(name: String) extends AnyVal {
+    def showQuoted: String = "\"" + name + "\""
+  }
 
   sealed trait ReferenceData[Type] extends Product with Serializable
 
@@ -168,7 +170,7 @@ object datas {
     private[datas] def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
       case ReferenceData.Column(column, scope) =>
         val scopeString = scope.foldMap(_ + ".")
-        TypedFragment(Fragment.const(scopeString + "\"" + column.name + "\""), getType)
+        TypedFragment(Fragment.const(scopeString + column.showQuoted), getType)
       case l: ReferenceData.Lift[a] =>
         implicit val param: Param[a HCons HNil] = l.into
         val _ = param //to make scalac happy
