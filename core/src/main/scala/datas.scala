@@ -16,6 +16,11 @@ import cats.FlatMap
 import cats.data.OptionT
 
 object datas {
+
+  trait SequenceK[Alg[_[_]]] {
+    def sequence[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]]
+  }
+
   type ColumnList = List[Column]
 
   object schemas {
@@ -277,7 +282,7 @@ object datas {
     def mapBoth[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
   }
 
-  //A *->*->* -kinded option transformer
+  //A ((*->*)->*)->* (or so)-kinded option transformer
   case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, ?]])
 
   object OptionTK {

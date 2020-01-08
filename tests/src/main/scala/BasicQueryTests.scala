@@ -12,6 +12,11 @@ import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
+import cats.Applicative
+import cats.Monad
+import cats.Apply
+import datas.SequenceK
+import cats.data.Nested
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -162,7 +167,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         val q = userSchema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
-      },
+      }
     )
 
   def innerJoinTests = tests(
@@ -342,7 +347,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   )(
     implicit xa: Transactor[IO]
   ): IO[NonEmptyList[Assertion]] = {
-    val showQuery = (if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit)
+    val showQuery = if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit
 
     showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
@@ -363,15 +368,27 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val userSchema: TableQuery[User] =
     caseClassSchema(
       TableName("users"),
-      (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference])
-    )(User.unapply[Reference](_).get.mapN(User[cats.Id] _))
+      User
+        .sequenceK
+        .sequence[ST, Reference](
+          User[λ[a => ST[Reference[a]]]](column[Long]("id"), column[String]("name"), column[Int]("age"))
+        )
+    )(User.sequenceK.sequence[Reference, cats.Id](_))
 
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
-      (column[Long]("id"), column[Long]("user_id"), column[Long]("parent_id").map(Reference.liftOption), column[String]("name"))
-        .mapN(Book[Reference])
-    )(Book.unapply[Reference](_).get.mapN(Book[cats.Id] _))
+      Book
+        .sequenceK
+        .sequence[ST, Reference](
+          Book[λ[a => ST[Reference[a]]]](
+            column[Long]("id"),
+            column[Long]("user_id"),
+            column[Long]("parent_id").map(Reference.liftOption),
+            column[String]("name")
+          )
+        )
+    )(Book.sequenceK.sequence[Reference, cats.Id](_))
 }
 
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
@@ -379,6 +396,10 @@ final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
 object User {
   implicit val functorK: FunctorK[User] = new FunctorK[User] {
     def mapK[F[_], G[_]](af: User[F])(fk: F ~> G): User[G] = User(fk(af.id), fk(af.name), fk(af.age))
+  }
+
+  implicit val sequenceK: SequenceK[User] = new SequenceK[User] {
+    def sequence[F[_]: Apply, G[_]](alg: User[λ[a => F[G[a]]]]): F[User[G]] = (alg.id, alg.name, alg.age).mapN(User[G])
   }
 
   implicit val showId: Show[User[cats.Id]] = Show.fromToString
@@ -391,5 +412,9 @@ object Book {
 
     def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] =
       Book(id = fk(af.id), userId = fk(af.userId), parentId = fk(af.parentId), name = fk(af.name))
+  }
+
+  implicit val sequenceK: SequenceK[Book] = new SequenceK[Book] {
+    def sequence[F[_]: Apply, G[_]](alg: Book[λ[a => F[G[a]]]]): F[Book[G]] = (alg.id, alg.userId, alg.parentId, alg.name).mapN(Book[G])
   }
 }
