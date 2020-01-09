@@ -7,7 +7,7 @@ import cats.tagless.FunctorK
 trait JoinKind[A[_[_]], B[_[_]], Joined[_[_]]] {
   final type Out[F[_]] = Joined[F]
 
-  def buildJoined(a: A[Reference], b: B[Reference]): Joined[Reference]
+  def buildJoint(a: A[Reference], b: B[Reference]): Joined[Reference]
   def kind: String
 }
 
@@ -23,7 +23,7 @@ object JoinKind {
   )(
     build: (A[Reference], B[Reference]) => Joined[Reference]
   ): JoinKind[A, B, Joined] = new JoinKind[A, B, Joined] {
-    def buildJoined(a: A[Reference], b: B[Reference]): Joined[Reference] = build(a, b)
+    def buildJoint(a: A[Reference], b: B[Reference]): Joined[Reference] = build(a, b)
     val kind: String = name
   }
 }

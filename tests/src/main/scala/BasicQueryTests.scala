@@ -14,7 +14,6 @@ import flawless.data.Assertion
 import cats.Apply
 import datas.tagless.TraverseK
 import datas.Query
-import datas.TableName
 import datas.Reference
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
