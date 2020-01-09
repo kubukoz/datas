@@ -378,7 +378,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   }
 }
 import datas.schemas._
-import datas.TableQuery
+import datas.QueryBase
 
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
 
@@ -388,7 +388,7 @@ object User {
       (fk(alg.id), fk(alg.name), fk(alg.age)).mapN(User[H])
   }
 
-  val schema: TableQuery[User] =
+  val schema: QueryBase[User] =
     caseClassSchema(
       TableName("users"),
       User(column[Long]("id"), column[String]("name"), column[Int]("age"))
@@ -405,7 +405,7 @@ object Book {
       (fk(alg.id), fk(alg.userId), fk(alg.parentId), fk(alg.name)).mapN(Book[H])
   }
 
-  val schema: TableQuery[Book] =
+  val schema: QueryBase[Book] =
     caseClassSchema(
       TableName("books"),
       Book(

@@ -41,43 +41,46 @@ object schemas {
   def column[Type: Get](name: String): ColumnK[Type] =
     ColumnK.Named(Column(name), Get[Type])
 
-  def caseClassSchema[F[_[_]]: TraverseK](name: TableName, columns: F[ColumnK]): TableQuery[F] =
-    TableQuery.FromTable(name, columns.mapK(columnToStRef), TraverseK[F])
+  def caseClassSchema[F[_[_]]: TraverseK](name: TableName, columns: F[ColumnK]): QueryBase[F] =
+    QueryBase.FromTable(name, columns.mapK(columnToStRef), TraverseK[F])
 }
 
 final case class TableName(name: String) extends AnyVal {
   private[datas] def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
 }
 
-sealed trait TableQuery[A[_[_]]] extends Product with Serializable {
+/**
+  * QueryBase: a thing you can query from. It'll usually be a table or a join thereof.
+  */
+sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
   def innerJoin[B[_[_]]](
-    another: TableQuery[B]
+    another: QueryBase[B]
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-  ): TableQuery[JoinKind.Inner[A, B]#Out] =
+  ): QueryBase[JoinKind.Inner[A, B]#Out] =
     join(another)(_.inner)(onClause)
 
   def leftJoin[B[_[_]]: FunctorK](
-    another: TableQuery[B]
+    another: QueryBase[B]
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-  ): TableQuery[JoinKind.Left[A, B]#Out] =
+  ): QueryBase[JoinKind.Left[A, B]#Out] =
     join(another)(_.left)(onClause)
 
   private def join[B[_[_]], Joined[_[_]]](
-    another: TableQuery[B]
+    another: QueryBase[B]
   )(
     kindF: JoinKind.type => JoinKind[A, B, Joined]
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-  ): TableQuery[Joined] =
-    TableQuery.Join(this, another, kindF(JoinKind), onClause)
+  ): QueryBase[Joined] =
+    QueryBase.Join(this, another, kindF(JoinKind), onClause)
 
   def selectAll: Query[A, A[cats.Id]] = select { aref =>
     this match {
-      case ft: TableQuery.FromTable[A] => ft.traverseK.sequenceKId(aref)
-      case _                           => throw new Exception("select * isn't supported on joins yet")
+      case ft: QueryBase.FromTable[A] => ft.traverseK.sequenceKId(aref)
+      case _                          => throw new Exception("select * isn't supported on joins yet")
     }
   }
 
@@ -85,20 +88,20 @@ sealed trait TableQuery[A[_[_]]] extends Product with Serializable {
     Query(this, selection, filters = Chain.empty)
 }
 
-private[datas] object TableQuery {
-  final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], traverseK: TraverseK[A]) extends TableQuery[A]
+private[datas] object QueryBase {
+  final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], traverseK: TraverseK[A]) extends QueryBase[A]
 
   final case class Join[A[_[_]], B[_[_]], Joined[_[_]]](
-    left: TableQuery[A],
-    right: TableQuery[B],
+    left: QueryBase[A],
+    right: QueryBase[B],
     kind: JoinKind[A, B, Joined],
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-  ) extends TableQuery[Joined]
+  ) extends QueryBase[Joined]
 
   /**
     * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
     */
-  def compileQuery[A[_[_]], F[_]: IndexState: FlatMap]: TableQuery[A] => F[(Fragment, A[Reference])] = {
+  def compileQuery[A[_[_]], F[_]: IndexState: FlatMap]: QueryBase[A] => F[(Fragment, A[Reference])] = {
     case t: FromTable[A] =>
       implicit val functorK: FunctorK[A] = t.traverseK
       IndexState.getAndInc[F].map { index =>
@@ -236,7 +239,7 @@ object Reference {
 }
 
 final case class Query[A[_[_]], Queried](
-  base: TableQuery[A],
+  base: QueryBase[A],
   selection: A[Reference] => Reference[Queried],
   filters: Chain[A[Reference] => Reference[Boolean]]
 ) {
@@ -245,7 +248,7 @@ final case class Query[A[_[_]], Queried](
     copy(filters = filters.append(filter))
 
   def compileSql: Query0[Queried] = {
-    val (compiledQueryBase, compiledReference) = TableQuery.compileQuery[A, State[Int, *]].apply(base).runA(0).value
+    val (compiledQueryBase, compiledReference) = QueryBase.compileQuery[A, State[Int, *]].apply(base).runA(0).value
 
     val compiledSelection = selection(compiledReference).compile
 
