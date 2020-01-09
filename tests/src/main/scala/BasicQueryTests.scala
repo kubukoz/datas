@@ -12,7 +12,10 @@ import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
 import cats.Apply
-import datas.TraverseK
+import datas.tagless.TraverseK
+import datas.Query
+import datas.TableName
+import datas.Reference
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -34,7 +37,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
   }
 
-  import datas._
+  import datas.ops._
 
   def run: Suite[IO] =
     suite("BasicQueryTests") {
@@ -360,6 +363,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   }
 
   import datas.schemas._
+
+  import datas.TableQuery
 
   val userSchema: TableQuery[User] =
     caseClassSchema(
