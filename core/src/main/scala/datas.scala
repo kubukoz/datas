@@ -30,24 +30,19 @@ object ColumnK {
 }
 
 object schemas {
-  type ST[X] = State[Chain[Column], X]
-
-  private type STRef[X] = ST[Reference[X]]
-
-  private val columnToStRef: ColumnK ~> STRef = λ[ColumnK ~> STRef] {
+  private val columnToStRef: ColumnK ~> Reference = λ[ColumnK ~> Reference] {
     case ColumnK.Named(name, get) =>
-      val rf = Reference.Single(ReferenceData.Column(name, none), get)
-      State.modify[Chain[Column]](_.append(name)).as(rf)
+      Reference.Single(ReferenceData.Column(name, none), get)
 
     case ColumnK.Optional(underlying) =>
-      columnToStRef(underlying).map(Reference.liftOption)
+      Reference.liftOption(columnToStRef(underlying))
   }
 
   def column[Type: Get](name: String): ColumnK[Type] =
     ColumnK.Named(Column(name), Get[Type])
 
   def caseClassSchema[F[_[_]]: TraverseK](name: TableName, columns: F[ColumnK]): TableQuery[F] =
-    TraverseK[F].traverseK(columns)(columnToStRef).runA(Chain.empty).map(schema => TableQuery.FromTable(name, schema, TraverseK[F])).value
+    TableQuery.FromTable(name, columns.mapK(columnToStRef), TraverseK[F])
 }
 
 final case class TableName(name: String) extends AnyVal {
