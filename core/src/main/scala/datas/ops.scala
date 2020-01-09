@@ -4,6 +4,10 @@ import doobie.implicits._
 
 object ops {
 
+  implicit final class ReferenceOps[Type](private val self: Reference[Type]) extends AnyVal {
+    def >=(another: Reference[Type]): Reference[Boolean] = over(self, another)
+  }
+
   def over[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
     binary(_ ++ fr">" ++ _)
 

@@ -335,11 +335,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         .leftJoin(Book.schema) { (u, b) =>
           equal(u.id, b.userId)
         }
-        .select {
-          _.asTuple match {
-            case (user, book) =>
-              (user.name, book.underlying.name.value).tupled
-          }
+        .select { t =>
+          val user = t.left
+          val book = t.right
+
+          (user.name, book.underlying.name.value).tupled
         }
 
       expectAllToBe(q)(

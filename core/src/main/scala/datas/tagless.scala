@@ -25,14 +25,14 @@ object tagless {
     def apply[Alg[_[_]]](implicit S: TraverseK[Alg]): TraverseK[Alg] = S
   }
 
-//A ((*->*)->*)->* (or so)-kinded option transformer
-  case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, ?]])
+  // An option transformer for higher-kinded types
+  final case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, ?]]) extends AnyVal
 
   object OptionTK {
     def liftK[F[_[_]]: FunctorK, G[_]](fg: F[G])(lift: G ~> OptionT[G, ?]): OptionTK[F, G] = OptionTK(fg.mapK(lift))
   }
 
-//A tuple2 of even-higher-kinded types.
+  // A tuple2 of higher-kinded types.
   final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
     def asTuple: (A[F], B[F]) = (left, right)
   }

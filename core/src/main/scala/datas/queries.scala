@@ -8,7 +8,7 @@ import cats.mtl.instances.all._
 import doobie.util.Read
 import doobie.Fragments
 
-final case class Query[A[_[_]], Queried](
+final case class Query[A[_[_]], Queried] private[datas] (
   base: QueryBase[A],
   selection: A[Reference] => Reference[Queried],
   filters: Chain[A[Reference] => Reference[Boolean]]
