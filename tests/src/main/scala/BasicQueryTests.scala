@@ -12,11 +12,8 @@ import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
-import cats.Applicative
-import cats.Monad
 import cats.Apply
 import datas.SequenceK
-import cats.data.Nested
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -368,16 +365,16 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   val userSchema: TableQuery[User] =
     caseClassSchema(
       TableName("users"),
-      User[STRef](column[Long]("id"), column[String]("name"), column[Int]("age"))
+      User(column[Long]("id"), column[String]("name"), column[Int]("age"))
     )
 
   val bookSchema: TableQuery[Book] =
     caseClassSchema(
       TableName("books"),
-      Book[STRef](
+      Book(
         column[Long]("id"),
         column[Long]("user_id"),
-        column[Long]("parent_id").map(Reference.liftOption),
+        column[Long]("parent_id").optional,
         column[String]("name")
       )
     )

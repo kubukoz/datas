@@ -21,21 +21,38 @@ object datas {
     def sequence[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]]
   }
 
-  type ColumnList = List[Column]
+  //todo naming
+  sealed trait ColumnK[A] extends Product with Serializable {
+    def optional: ColumnK[Option[A]] = ColumnK.Optional(this)
+  }
+
+  object ColumnK {
+    final case class Named[A](name: Column, get: Get[A]) extends ColumnK[A]
+    final case class Optional[A](underlying: ColumnK[A]) extends ColumnK[Option[A]]
+  }
+
+  type ColumnList = Chain[Column]
 
   object schemas {
     type ST[X] = State[Chain[Column], X]
-    type STRef[X] = ST[Reference[X]]
 
-    def column[Type: Get](name: String): STRef[Type] = {
-      val col = Column(name)
+    private type STRef[X] = ST[Reference[X]]
 
-      State.modify[Chain[Column]](_.append(col)).as(Reference.Single(ReferenceData.Column(col, None), Get[Type]))
+    private val columnToStRef: ColumnK ~> STRef = λ[ColumnK ~> STRef] {
+      case ColumnK.Named(name, get) =>
+        val rf = Reference.Single(ReferenceData.Column(name, none), get)
+        State.modify[ColumnList](_.append(name)).as(rf)
+
+      case ColumnK.Optional(underlying) =>
+        columnToStRef(underlying).map(Reference.liftOption)
     }
 
-    def caseClassSchema[F[_[_]]: FunctorK: SequenceK](name: TableName, stClass: F[STRef]): TableQuery[F] =
+    def column[Type: Get](name: String): ColumnK[Type] =
+      ColumnK.Named(Column(name), Get[Type])
+
+    def caseClassSchema[F[_[_]]: FunctorK: SequenceK](name: TableName, stClass: F[ColumnK]): TableQuery[F] =
       implicitly[SequenceK[F]]
-        .sequence(stClass)
+        .sequence(stClass.mapK(columnToStRef))
         .runA(Chain.empty)
         .map(w => TableQuery.FromTable(name, w, FunctorK[F], implicitly[SequenceK[F]].sequence[Reference, cats.Id]))
         .value
