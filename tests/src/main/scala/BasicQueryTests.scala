@@ -4,7 +4,6 @@ import flawless.dsl._
 import flawless.predicates.all._
 import cats.effect.{test => _, _}
 import cats.implicits._
-import cats.tagless.FunctorK
 import cats.~>
 import fs2.Pipe
 import cats.Show
@@ -13,7 +12,7 @@ import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
 import cats.Apply
-import datas.SequenceK
+import datas.TraverseK
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -316,7 +315,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   def leftJoinTests = tests(
     test("left join users and books") {
       val q = userSchema
-        .join(bookSchema)(_.left) { (u, b) =>
+        .leftJoin(bookSchema) { (u, b) =>
           equal(u.id, b.userId)
         }
         .select {
@@ -383,12 +382,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
 
 object User {
-  implicit val functorK: FunctorK[User] = new FunctorK[User] {
-    def mapK[F[_], G[_]](af: User[F])(fk: F ~> G): User[G] = User(fk(af.id), fk(af.name), fk(af.age))
-  }
-
-  implicit val sequenceK: SequenceK[User] = new SequenceK[User] {
-    def sequenceK[F[_]: Apply, G[_]](alg: User[λ[a => F[G[a]]]]): F[User[G]] = (alg.id, alg.name, alg.age).mapN(User[G])
+  implicit val traverseK: TraverseK[User] = new TraverseK[User] {
+    override def traverseK[F[_], G[_]: Apply, H[_]](alg: User[F])(fk: F ~> λ[a => G[H[a]]]): G[User[H]] =
+      (fk(alg.id), fk(alg.name), fk(alg.age)).mapN(User[H])
   }
 
   implicit val showId: Show[User[cats.Id]] = Show.fromToString
@@ -397,13 +393,8 @@ object User {
 final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]], name: F[String])
 
 object Book {
-  implicit val functorK: FunctorK[Book] = new FunctorK[Book] {
-
-    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] =
-      Book(id = fk(af.id), userId = fk(af.userId), parentId = fk(af.parentId), name = fk(af.name))
-  }
-
-  implicit val sequenceK: SequenceK[Book] = new SequenceK[Book] {
-    def sequenceK[F[_]: Apply, G[_]](alg: Book[λ[a => F[G[a]]]]): F[Book[G]] = (alg.id, alg.userId, alg.parentId, alg.name).mapN(Book[G])
+  implicit val sequenceK: TraverseK[Book] = new TraverseK[Book] {
+    override def traverseK[F[_], G[_]: Apply, H[_]](alg: Book[F])(fk: F ~> λ[a => G[H[a]]]): G[Book[H]] =
+      (fk(alg.id), fk(alg.userId), fk(alg.parentId), fk(alg.name)).mapN(Book[H])
   }
 }

@@ -14,11 +14,24 @@ import cats.mtl.MonadState
 import cats.mtl.instances.all._
 import cats.FlatMap
 import cats.data.OptionT
+import cats.arrow.FunctionK
 
 object datas {
 
-  trait SequenceK[Alg[_[_]]] {
-    def sequenceK[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]]
+  trait TraverseK[Alg[_[_]]] extends FunctorK[Alg] {
+
+    def traverseK[F[_], G[_]: Apply, H[_]](alg: Alg[F])(fk: F ~> λ[a => G[H[a]]]): G[Alg[H]]
+
+    def sequenceK[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]] =
+      traverseK[λ[a => F[G[a]]], F, G](alg)(FunctionK.id[λ[a => F[G[a]]]])
+
+    def mapK[F[_], G[_]](af: Alg[F])(fk: F ~> G): Alg[G] = traverseK[F, cats.Id, G](af)(fk)
+
+    def sequenceKId[F[_]: Apply](alg: Alg[F]): F[Alg[cats.Id]] = sequenceK[F, cats.Id](alg)
+  }
+
+  object TraverseK {
+    def apply[Alg[_[_]]](implicit S: TraverseK[Alg]): TraverseK[Alg] = S
   }
 
   //todo naming
@@ -50,12 +63,8 @@ object datas {
     def column[Type: Get](name: String): ColumnK[Type] =
       ColumnK.Named(Column(name), Get[Type])
 
-    def caseClassSchema[F[_[_]]: FunctorK: SequenceK](name: TableName, stClass: F[ColumnK]): TableQuery[F] =
-      implicitly[SequenceK[F]]
-        .sequenceK(stClass.mapK(columnToStRef))
-        .runA(Chain.empty)
-        .map(w => TableQuery.FromTable(name, w, FunctorK[F], implicitly[SequenceK[F]].sequenceK[Reference, cats.Id]))
-        .value
+    def caseClassSchema[F[_[_]]: TraverseK](name: TableName, columns: F[ColumnK]): TableQuery[F] =
+      TraverseK[F].traverseK(columns)(columnToStRef).runA(Chain.empty).map(schema => TableQuery.FromTable(name, schema, TraverseK[F])).value
   }
 
   final case class TableName(name: String) extends AnyVal {
@@ -85,7 +94,7 @@ object datas {
     ): TableQuery[JoinKind.Left[A, B]#Out] =
       join(another)(_.left)(onClause)
 
-    def join[B[_[_]], Joined[_[_]]](
+    private def join[B[_[_]], Joined[_[_]]](
       another: TableQuery[B]
     )(
       kindF: JoinKind.type => JoinKind[A, B, Joined]
@@ -94,19 +103,20 @@ object datas {
     ): TableQuery[Joined] =
       TableQuery.Join(this, another, kindF(JoinKind), onClause)
 
-    def selectAll: Query[A, A[cats.Id]] = select(aref => this.asInstanceOf[TableQuery.FromTable[A]].unwrap(aref))
+    def selectAll: Query[A, A[cats.Id]] = select { aref =>
+      this match {
+        case ft: TableQuery.FromTable[A] => ft.traverseK.sequenceKId(aref)
+        case _                           => throw new Exception("select * isn't supported on joins yet")
+      }
+    }
 
     def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
       Query(this, selection, filters = Chain.empty)
   }
 
   private[datas] object TableQuery {
-    final case class FromTable[A[_[_]]](
-      table: TableName,
-      lifted: A[Reference],
-      functorK: FunctorK[A],
-      unwrap: A[Reference] => Reference[A[cats.Id]]
-    ) extends TableQuery[A]
+    final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], traverseK: TraverseK[A]) extends TableQuery[A]
+
     final case class Join[A[_[_]], B[_[_]], Joined[_[_]]](
       left: TableQuery[A],
       right: TableQuery[B],
@@ -118,8 +128,8 @@ object datas {
       * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
       */
     def compileQuery[A[_[_]], F[_]: IndexState: FlatMap]: TableQuery[A] => F[(Fragment, A[Reference])] = {
-      case t: FromTable[t] =>
-        implicit val functorK = t.functorK
+      case t: FromTable[A] =>
+        implicit val functorK: FunctorK[A] = t.traverseK
         IndexState.getAndInc[F].map { index =>
           val scope = t.table.name + "_x" + index
           (
