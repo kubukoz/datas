@@ -4,7 +4,6 @@ import flawless.dsl._
 import flawless.predicates.all._
 import cats.effect.{test => _, _}
 import cats.implicits._
-import cats.tagless.FunctorK
 import cats.~>
 import fs2.Pipe
 import cats.Show
@@ -12,6 +11,11 @@ import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import flawless.data.Suite
 import flawless.data.Assertion
+import cats.Apply
+import datas.tagless.TraverseK
+import datas.Query
+import datas.TableName
+import datas.Reference
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
@@ -33,7 +37,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
   }
 
-  import datas._
+  import datas.ops._
 
   def run: Suite[IO] =
     suite("BasicQueryTests") {
@@ -48,42 +52,42 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   def singleColumnTests =
     tests(
       test("select single column from table") {
-        val q = userSchema.select(_.name)
+        val q = User.schema.select(_.name)
 
         expectAllToBe(q)("Jon", "Jakub", "John")
       },
       test("select second column from table") {
-        val q = userSchema.select(_.age)
+        val q = User.schema.select(_.age)
 
         expectAllToBe(q)(36, 23, 40)
       },
       test("select + map") {
-        val q = userSchema.select(_.name.map(_ + "X"))
+        val q = User.schema.select(_.name.map(_ + "X"))
 
         expectAllToBe(q)("JonX", "JakubX", "JohnX")
       },
       test("select lifted constant") {
-        val q = userSchema.select(_ => Reference.lift(1))
+        val q = User.schema.select(_ => Reference.lift(1))
 
         expectAllToBe(q)(1, 1, 1)
       },
       test("select lifted + mapped constant") {
-        val q = userSchema.select(_ => Reference.lift(1).map(_ + 1))
+        val q = User.schema.select(_ => Reference.lift(1).map(_ + 1))
 
         expectAllToBe(q)(2, 2, 2)
       },
       test("select option-lifted constant") {
-        val q = userSchema.select(_ => Reference.liftOption(Reference.lift(1)))
+        val q = User.schema.select(_ => Reference.liftOption(Reference.lift(1)))
 
         expectAllToBe(q)(1.some, 1.some, 1.some)
       },
       test("select equality of same field") {
-        val q = userSchema.select(u => equal(u.name, u.name))
+        val q = User.schema.select(u => equal(u.name, u.name))
 
         expectAllToBe(q)(true, true, true)
       },
       test("select equality of field with constant") {
-        val q = userSchema.select(u => equal(u.name, Reference.lift("Jon")))
+        val q = User.schema.select(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(true, false, false)
       }
@@ -94,13 +98,15 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       test("select two columns from single table") {
 
         val q =
-          userSchema.select(
-            u =>
-              (
-                u.name,
-                u.age
-              ).tupled
-          )
+          User
+            .schema
+            .select(
+              u =>
+                (
+                  u.name,
+                  u.age
+                ).tupled
+            )
 
         expectAllToBe(q)(
           ("Jon", 36),
@@ -111,13 +117,15 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       test("querying equalities") {
 
         val q =
-          userSchema.select(
-            u =>
-              (
-                equal(u.age, Reference.lift(23)),
-                equal(Reference.lift(5), Reference.lift(10))
-              ).tupled
-          )
+          User
+            .schema
+            .select(
+              u =>
+                (
+                  equal(u.age, Reference.lift(23)),
+                  equal(Reference.lift(5), Reference.lift(10))
+                ).tupled
+            )
 
         expectAllToBe(q)(
           (false, false),
@@ -128,7 +136,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       test("conditions in queries") {
 
         val q =
-          userSchema
+          User
+            .schema
             .select(
               u =>
                 (
@@ -146,7 +155,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       test("querying custom references") {
 
         val q =
-          userSchema.select { u =>
+          User.schema.select { u =>
             (
               Reference.lift(true),
               Reference.liftOption(Reference.lift(5L)),
@@ -157,13 +166,19 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         expectAllToBe(q)(
           List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)): _*
         )
+      },
+      test("select all from user") {
+        val q = User.schema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
+
+        expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
       }
     )
 
   def innerJoinTests = tests(
     test("inner join users and books") {
-      val q = userSchema
-        .innerJoin(bookSchema) { (u, b) =>
+      val q = User
+        .schema
+        .innerJoin(Book.schema) { (u, b) =>
           equal(u.id, b.userId)
         }
         .select {
@@ -178,11 +193,12 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       )
     },
     test("(a join b) join c)") {
-      val q = userSchema
-        .innerJoin(bookSchema) { (u, b) =>
+      val q = User
+        .schema
+        .innerJoin(Book.schema) { (u, b) =>
           equal(u.id, b.userId)
         }
-        .innerJoin(bookSchema) { (t, b) =>
+        .innerJoin(Book.schema) { (t, b) =>
           equal(t.right.parentId, b.id.map(_.some))
         }
         .select {
@@ -196,8 +212,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       )
     },
     test("a join (b join c)") {
-      val q = userSchema
-        .innerJoin(bookSchema.innerJoin(bookSchema) { (b, bP) =>
+      val q = User
+        .schema
+        .innerJoin(Book.schema.innerJoin(Book.schema) { (b, bP) =>
           equalOptionL(b.parentId, bP.id)
         }) { (u, t) =>
           equal(u.id, t.left.userId)
@@ -213,16 +230,17 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       )
     },
     test("(((a join b) join c) join d)") {
-      val q = bookSchema
-        .innerJoin(bookSchema) { (b, bP) =>
+      val q = Book
+        .schema
+        .innerJoin(Book.schema) { (b, bP) =>
           equalOptionL(b.parentId, bP.id)
         }
         .innerJoin(
-          userSchema
+          User.schema
         ) { (t, u) =>
           equal(u.id, t.left.userId)
         }
-        .innerJoin(userSchema) { (t, u) =>
+        .innerJoin(User.schema) { (t, u) =>
           equal(u.id, t.left.left.userId)
         }
         .select(_.right.id)
@@ -232,16 +250,17 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       )
     },
     test("(((a join b) join c) join d) join (((e join f) join g) join h)") {
-      val q = bookSchema
-        .innerJoin(bookSchema) { (b, bP) =>
+      val q = Book
+        .schema
+        .innerJoin(Book.schema) { (b, bP) =>
           equalOptionL(b.parentId, bP.id)
         }
         .innerJoin(
-          userSchema
+          User.schema
         ) { (t, u) =>
           equal(u.id, t.left.userId)
         }
-        .innerJoin(userSchema) { (t, u) =>
+        .innerJoin(User.schema) { (t, u) =>
           equal(u.id, t.left.left.userId)
         }
 
@@ -269,26 +288,30 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       )
     },
     test("a join (b join (c join d))") {
-      val inner = userSchema.innerJoin(
-        bookSchema.innerJoin(bookSchema) { (b, bP) =>
-          equalOptionL(b.parentId, bP.id)
+      val inner = User
+        .schema
+        .innerJoin(
+          Book.schema.innerJoin(Book.schema) { (b, bP) =>
+            equalOptionL(b.parentId, bP.id)
+          }
+        ) { (u, t) =>
+          equal(u.id, t.left.userId)
         }
-      ) { (u, t) =>
-        equal(u.id, t.left.userId)
-      }
 
-      val q = userSchema.innerJoin(
-        inner
-      ) { (u, t) =>
-        equal(u.id, t.right.right.userId)
-      }
+      val q = User
+        .schema
+        .innerJoin(
+          inner
+        ) { (u, t) =>
+          equal(u.id, t.right.right.userId)
+        }
 
       expectAllToBe(q.select(_.left.id))(
         2L
       )
     },
     test("(a join b) join (a join b)") {
-      val inner = bookSchema.innerJoin(bookSchema) { (b, bP) =>
+      val inner = Book.schema.innerJoin(Book.schema) { (b, bP) =>
         equalOptionL(b.parentId, bP.id)
       }
 
@@ -308,8 +331,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
 
   def leftJoinTests = tests(
     test("left join users and books") {
-      val q = userSchema
-        .join(bookSchema)(_.left) { (u, b) =>
+      val q = User
+        .schema
+        .leftJoin(Book.schema) { (u, b) =>
           equal(u.id, b.userId)
         }
         .select {
@@ -327,7 +351,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     }
   )
 
-  val debugOn = false
+  val debugOn = true
   def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
   def expectAllToBe[A[_[_]], Queried: Show: Diff](
@@ -337,7 +361,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   )(
     implicit xa: Transactor[IO]
   ): IO[NonEmptyList[Assertion]] = {
-    val showQuery = (if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit)
+    val showQuery = if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit
 
     showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
@@ -352,38 +376,43 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
       case Right(values) => ensure(values, equalTo(expectedList.toList))
     }
   }
-
-  import datas.schemas._
-
-  val userSchema: TableQuery[User] =
-    caseClassSchema(
-      TableName("users"),
-      (column[Long]("id"), column[String]("name"), column[Int]("age")).mapN(User[Reference])
-    )
-
-  val bookSchema: TableQuery[Book] =
-    caseClassSchema(
-      TableName("books"),
-      (column[Long]("id"), column[Long]("user_id"), column[Long]("parent_id").map(Reference.liftOption), column[String]("name"))
-        .mapN(Book[Reference])
-    )
-
 }
+import datas.schemas._
+import datas.TableQuery
 
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
 
 object User {
-  implicit val functorK: FunctorK[User] = new FunctorK[User] {
-    def mapK[F[_], G[_]](af: User[F])(fk: F ~> G): User[G] = User(fk(af.id), fk(af.name), fk(af.age))
+  implicit val traverseK: TraverseK[User] = new TraverseK[User] {
+    override def traverseK[F[_], G[_]: Apply, H[_]](alg: User[F])(fk: F ~> λ[a => G[H[a]]]): G[User[H]] =
+      (fk(alg.id), fk(alg.name), fk(alg.age)).mapN(User[H])
   }
+
+  val schema: TableQuery[User] =
+    caseClassSchema(
+      TableName("users"),
+      User(column[Long]("id"), column[String]("name"), column[Int]("age"))
+    )
+
+  implicit val showId: Show[User[cats.Id]] = Show.fromToString
 }
 
 final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]], name: F[String])
 
 object Book {
-  implicit val functorK: FunctorK[Book] = new FunctorK[Book] {
-
-    def mapK[F[_], G[_]](af: Book[F])(fk: F ~> G): Book[G] =
-      Book(id = fk(af.id), userId = fk(af.userId), parentId = fk(af.parentId), name = fk(af.name))
+  implicit val sequenceK: TraverseK[Book] = new TraverseK[Book] {
+    override def traverseK[F[_], G[_]: Apply, H[_]](alg: Book[F])(fk: F ~> λ[a => G[H[a]]]): G[Book[H]] =
+      (fk(alg.id), fk(alg.userId), fk(alg.parentId), fk(alg.name)).mapN(Book[H])
   }
+
+  val schema: TableQuery[Book] =
+    caseClassSchema(
+      TableName("books"),
+      Book(
+        column[Long]("id"),
+        column[Long]("user_id"),
+        column[Long]("parent_id").optional,
+        column[String]("name")
+      )
+    )
 }
