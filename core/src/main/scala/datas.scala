@@ -18,7 +18,7 @@ import cats.data.OptionT
 object datas {
 
   trait SequenceK[Alg[_[_]]] {
-    def sequence[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]]
+    def sequenceK[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]]
   }
 
   //todo naming
@@ -52,9 +52,9 @@ object datas {
 
     def caseClassSchema[F[_[_]]: FunctorK: SequenceK](name: TableName, stClass: F[ColumnK]): TableQuery[F] =
       implicitly[SequenceK[F]]
-        .sequence(stClass.mapK(columnToStRef))
+        .sequenceK(stClass.mapK(columnToStRef))
         .runA(Chain.empty)
-        .map(w => TableQuery.FromTable(name, w, FunctorK[F], implicitly[SequenceK[F]].sequence[Reference, cats.Id]))
+        .map(w => TableQuery.FromTable(name, w, FunctorK[F], implicitly[SequenceK[F]].sequenceK[Reference, cats.Id]))
         .value
   }
 

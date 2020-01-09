@@ -388,7 +388,7 @@ object User {
   }
 
   implicit val sequenceK: SequenceK[User] = new SequenceK[User] {
-    def sequence[F[_]: Apply, G[_]](alg: User[λ[a => F[G[a]]]]): F[User[G]] = (alg.id, alg.name, alg.age).mapN(User[G])
+    def sequenceK[F[_]: Apply, G[_]](alg: User[λ[a => F[G[a]]]]): F[User[G]] = (alg.id, alg.name, alg.age).mapN(User[G])
   }
 
   implicit val showId: Show[User[cats.Id]] = Show.fromToString
@@ -404,6 +404,6 @@ object Book {
   }
 
   implicit val sequenceK: SequenceK[Book] = new SequenceK[Book] {
-    def sequence[F[_]: Apply, G[_]](alg: Book[λ[a => F[G[a]]]]): F[Book[G]] = (alg.id, alg.userId, alg.parentId, alg.name).mapN(Book[G])
+    def sequenceK[F[_]: Apply, G[_]](alg: Book[λ[a => F[G[a]]]]): F[Book[G]] = (alg.id, alg.userId, alg.parentId, alg.name).mapN(Book[G])
   }
 }
