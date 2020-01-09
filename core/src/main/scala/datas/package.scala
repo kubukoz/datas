@@ -9,7 +9,7 @@ package object datas {
 
   private[datas] object IndexState {
     def apply[F[_]](implicit F: IndexState[F]): IndexState[F] = F
-    def getAndInc[F[_]: IndexState: Apply]: F[Int] = IndexState[F].get <* IndexState[F].modify(_ + 1)
+    def newIndex[F[_]: IndexState: Apply]: F[Int] = IndexState[F].get <* IndexState[F].modify(_ + 1)
   }
 
   private[datas] def setScope(scope: String): Reference ~> Reference = Reference.mapData {
