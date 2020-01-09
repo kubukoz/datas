@@ -223,7 +223,7 @@ object Reference {
         case Right(read) => read.map(_.some).asRight
       }
 
-    case m: Reference.Map[a, b] => compileReference(m.underlying).mapBoth(m.f)
+    case m: Reference.Map[a, b] => compileReference(m.underlying).map(m.f)
 
     case p: Reference.Product[a, b] =>
       def toRead[A]: Either[Get[A], Read[A]] => Read[A] = _.fold(Read.fromGet(_), identity)
@@ -272,7 +272,7 @@ private[datas] final case class CompiledReference[Type](frag: Fragment, readOrGe
   def ermap[T2](f: Either[Get[Type], Read[Type]] => Either[Get[T2], Read[T2]]): CompiledReference[T2] =
     CompiledReference(frag, f(readOrGet))
 
-  def mapBoth[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
+  def map[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
 }
 
 object ops {
