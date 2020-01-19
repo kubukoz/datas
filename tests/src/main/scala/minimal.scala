@@ -7,7 +7,6 @@ import cats.implicits._
 import datas.QueryBase
 import datas.schemas.caseClassSchema
 import datas.schemas.column
-import datas.schemas.TableName
 import cats.Show
 import doobie.ConnectionIO
 

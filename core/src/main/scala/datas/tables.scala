@@ -10,7 +10,6 @@ import cats.tagless.implicits._
 import cats.mtl.instances.all._
 import cats.FlatMap
 import datas.tagless.TraverseK
-import datas.schemas.TableName
 
 /**
   * QueryBase: a thing you can query from. It'll usually be a table or a join thereof.
@@ -87,4 +86,8 @@ private[datas] object QueryBase {
       }
   }
 
+  final case class TableName(name: String) extends AnyVal {
+    def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
+    def indexed(index: Int): TableName = TableName(name + "_x" + index)
+  }
 }

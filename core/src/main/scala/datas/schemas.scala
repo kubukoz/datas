@@ -1,11 +1,11 @@
 package datas
 
 import cats.implicits._
-import doobie.util.fragment.Fragment
 import doobie._
 import cats.~>
 import cats.tagless.implicits._
 import datas.tagless.TraverseK
+import datas.QueryBase.TableName
 
 object schemas {
 
@@ -21,11 +21,6 @@ object schemas {
 
     case ColumnK.Optional(underlying) =>
       Reference.liftOption(columnKToReference(underlying))
-  }
-
-  final case class TableName(name: String) extends AnyVal {
-    private[datas] def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
-    private[datas] def indexed(index: Int): TableName = TableName(name + "_x" + index)
   }
 
   //todo naming
