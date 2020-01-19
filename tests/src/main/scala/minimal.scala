@@ -23,7 +23,7 @@ object minimal {
 
     val schema: QueryBase[User] =
       caseClassSchema(
-        TableName("users"),
+        "users",
         User(column[Long]("id"), column[String]("name"), column[Int]("age"))
       )
 

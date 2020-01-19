@@ -5,7 +5,6 @@ import doobie.util.fragment.Fragment
 import doobie._
 import doobie.implicits._
 import cats.data.Chain
-import cats.data.State
 import cats.tagless.FunctorK
 import cats.tagless.implicits._
 import cats.mtl.instances.all._
@@ -35,11 +34,11 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   private def join[B[_[_]], Joined[_[_]]](
     another: QueryBase[B]
   )(
-    kindF: JoinKind.type => JoinKind[A, B, Joined]
+    how: JoinKind.type => JoinKind[A, B, Joined]
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[Joined] =
-    QueryBase.Join(this, another, kindF(JoinKind), onClause)
+    QueryBase.Join(this, another, how(JoinKind), onClause)
 
   def selectAll: Query[A, A[cats.Id]] = select { aref =>
     this match {
@@ -69,7 +68,7 @@ private[datas] object QueryBase {
     case t: FromTable[A] =>
       implicit val functorK: FunctorK[A] = t.traverseK
       IndexState.newIndex[F].map { index =>
-        val scope = t.table.name + "_x" + index
+        val scope = t.table.indexed(index).name
         (
           t.table.identifierFragment ++ Fragment.const(scope),
           t.lifted.mapK(setScope(scope))

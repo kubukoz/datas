@@ -6,6 +6,14 @@ object ops {
 
   implicit final class ReferenceOps[Type](private val self: Reference[Type]) extends AnyVal {
     def >=(another: Reference[Type]): Reference[Boolean] = over(self, another)
+    def <=(another: Reference[Type]): Reference[Boolean] = another >= self
+    def ===(another: Reference[Type]): Reference[Boolean] = equal(self, another)
+  }
+
+  implicit final class LiftAny[Type](private val self: Type) extends AnyVal {
+
+    def liftReference(implicit getType: Get[Type], putType: Put[Type]): Reference[Type] =
+      Reference.lift(self)
   }
 
   def over[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =

@@ -6,9 +6,11 @@ import cats.arrow.FunctionK
 import cats.~>
 import cats.data.OptionT
 import cats.tagless.implicits._
+import simulacrum.typeclass
 
 object tagless {
 
+  @typeclass
   trait TraverseK[Alg[_[_]]] extends FunctorK[Alg] {
 
     def traverseK[F[_], G[_]: Apply, H[_]](alg: Alg[F])(fk: F ~> λ[a => G[H[a]]]): G[Alg[H]]
@@ -16,13 +18,12 @@ object tagless {
     def sequenceK[F[_]: Apply, G[_]](alg: Alg[λ[a => F[G[a]]]]): F[Alg[G]] =
       traverseK[λ[a => F[G[a]]], F, G](alg)(FunctionK.id[λ[a => F[G[a]]]])
 
-    def mapK[F[_], G[_]](af: Alg[F])(fk: F ~> G): Alg[G] = traverseK[F, cats.Id, G](af)(fk)
+    override def mapK[F[_], G[_]](af: Alg[F])(fk: F ~> G): Alg[G] = traverseK[F, cats.Id, G](af)(fk)
 
+    /**
+      * Like [[sequenceK]], but with the second effect hardcoded to [[cats.Id]] for better inference.
+      * */
     def sequenceKId[F[_]: Apply](alg: Alg[F]): F[Alg[cats.Id]] = sequenceK[F, cats.Id](alg)
-  }
-
-  object TraverseK {
-    def apply[Alg[_[_]]](implicit S: TraverseK[Alg]): TraverseK[Alg] = S
   }
 
   // An option transformer for higher-kinded types

@@ -5,15 +5,13 @@ import doobie._
 import doobie.implicits._
 import cats.~>
 import cats.Apply
-import shapeless.HNil
-import shapeless.{:: => HCons}
 import cats.data.OptionT
 
 sealed trait ReferenceData[Type] extends Product with Serializable
 
 object ReferenceData {
   final case class Column[A](col: schemas.Column, scope: Option[String]) extends ReferenceData[A]
-  final case class Lift[Type](value: Type, into: Param[Type HCons HNil]) extends ReferenceData[Type]
+  final case class Lift[Type](value: Type, put: Put[Type]) extends ReferenceData[Type]
   final case class Raw[Type](fragment: Fragment) extends ReferenceData[Type]
 
   private[datas] def compileData[Type](getType: Get[Type]): ReferenceData[Type] => TypedFragment[Type] = {
@@ -22,8 +20,8 @@ object ReferenceData {
       TypedFragment(Fragment.const(scopeString + column.showQuoted), getType)
 
     case l: ReferenceData.Lift[a] =>
-      implicit val param: Param[a HCons HNil] = l.into
-      val _ = param //to make scalac happy
+      implicit val putType: Put[a] = l.put
+      val _ = putType //to make scalac happy
       TypedFragment(fr"${l.value}", getType)
 
     case r: ReferenceData.Raw[a] => TypedFragment(r.fragment, getType)
@@ -48,8 +46,8 @@ object Reference {
 
   def liftOption[Type](reference: Reference[Type]): Reference[Option[Type]] = liftOptionK(reference).value
 
-  def lift[Type: Get](value: Type)(implicit param: Param[Type HCons HNil]): Reference[Type] =
-    Reference.Single[Type](ReferenceData.Lift(value, param), Get[Type])
+  def lift[Type: Get: Put](value: Type): Reference[Type] =
+    Reference.Single[Type](ReferenceData.Lift(value, Put[Type]), Get[Type])
 
   def mapData(fk: ReferenceData ~> ReferenceData): Reference ~> Reference =
     λ[Reference ~> Reference] {

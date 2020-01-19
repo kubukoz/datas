@@ -8,22 +8,24 @@ import cats.tagless.implicits._
 import datas.tagless.TraverseK
 
 object schemas {
-  private val columnToStRef: ColumnK ~> Reference = λ[ColumnK ~> Reference] {
-    case ColumnK.Named(name, get) =>
-      Reference.Single(ReferenceData.Column(name, none), get)
-
-    case ColumnK.Optional(underlying) =>
-      Reference.liftOption(columnToStRef(underlying))
-  }
 
   def column[Type: Get](name: String): ColumnK[Type] =
     ColumnK.Named(Column(name), Get[Type])
 
-  def caseClassSchema[F[_[_]]: TraverseK](name: TableName, columns: F[ColumnK]): QueryBase[F] =
-    QueryBase.FromTable(name, columns.mapK(columnToStRef), TraverseK[F])
+  def caseClassSchema[F[_[_]]: TraverseK](name: String, columns: F[ColumnK]): QueryBase[F] =
+    QueryBase.FromTable(TableName(name), columns.mapK(columnKToReference), TraverseK[F])
+
+  private val columnKToReference: ColumnK ~> Reference = λ[ColumnK ~> Reference] {
+    case ColumnK.Named(name, get) =>
+      Reference.Single(ReferenceData.Column(name, none), get)
+
+    case ColumnK.Optional(underlying) =>
+      Reference.liftOption(columnKToReference(underlying))
+  }
 
   final case class TableName(name: String) extends AnyVal {
     private[datas] def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
+    private[datas] def indexed(index: Int): TableName = TableName(name + "_x" + index)
   }
 
   //todo naming

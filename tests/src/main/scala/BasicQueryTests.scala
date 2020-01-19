@@ -350,7 +350,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     }
   )
 
-  val debugOn = true
+  val debugOn = false
   def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
   def expectAllToBe[A[_[_]], Queried: Show: Diff](
@@ -389,7 +389,7 @@ object User {
 
   val schema: QueryBase[User] =
     caseClassSchema(
-      TableName("users"),
+      "users",
       User(column[Long]("id"), column[String]("name"), column[Int]("age"))
     )
 
@@ -406,7 +406,7 @@ object Book {
 
   val schema: QueryBase[Book] =
     caseClassSchema(
-      TableName("books"),
+      "books",
       Book(
         column[Long]("id"),
         column[Long]("user_id"),
