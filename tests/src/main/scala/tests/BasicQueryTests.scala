@@ -1,3 +1,5 @@
+package tests
+
 import doobie.Transactor
 import doobie.implicits._
 import flawless.dsl._

@@ -1,3 +1,5 @@
+package tests
+
 import java.util.concurrent.Executors
 
 import cats.effect.Blocker

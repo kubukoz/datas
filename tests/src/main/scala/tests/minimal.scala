@@ -1,4 +1,4 @@
-package demo
+package tests
 
 import datas.tagless.TraverseK
 import cats.Apply
