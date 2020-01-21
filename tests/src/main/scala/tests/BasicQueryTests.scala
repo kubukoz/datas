@@ -14,6 +14,7 @@ import datas.Query
 import datas.Reference
 import flawless._
 import flawless.data.Assertion
+import flawless.data.Suite
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
   import flawless.syntax._
@@ -173,7 +174,13 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           User.schema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
-      }
+      } /* ,
+      test("select all from simple join") {
+        val q = User.schema.innerJoin(Book.schema)(_.id === _.userId).selectAll
+
+        implicit def showAny[A]: Show[A] = Show.fromToString
+        expectAllToBe(q)()
+      } */
     )
 
   def innerJoinTests = tests(

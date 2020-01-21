@@ -10,6 +10,7 @@ import cats.tagless.implicits._
 import cats.mtl.instances.all._
 import cats.FlatMap
 import datas.tagless.TraverseK
+import datas.tagless.Tuple2KK
 
 /**
   * QueryBase: a thing you can query from. It'll usually be a table or a join thereof.
@@ -39,15 +40,10 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   ): QueryBase[Joined] =
     QueryBase.Join(this, another, how(JoinKind), onClause)
 
-  def selectAll: Query[A, A[cats.Id]] = select { aref =>
-    this match {
-      case ft: QueryBase.FromTable[A] => ft.traverseK.sequenceKId(aref)
-      case _                          => throw new Exception("select * isn't supported on joins yet")
-    }
-  }
+  def selectAll: Query[A, A[cats.Id]] = Query.All(this, filters = Chain.empty)
 
   def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
-    Query(this, selection, filters = Chain.empty)
+    Query.Function(this, selection, filters = Chain.empty)
 }
 
 private[datas] object QueryBase {
