@@ -4,11 +4,12 @@ import datas.tagless.Tuple2KK
 import datas.tagless.OptionTK
 import cats.tagless.FunctorK
 
-trait JoinKind[A[_[_]], B[_[_]], Joined[_[_]]] {
+sealed trait JoinKind[A[_[_]], B[_[_]], Joined[_[_]]] {
   final type Out[F[_]] = Joined[F]
 
-  def buildJoint(a: A[Reference], b: B[Reference]): Joined[Reference]
-  def kind: String
+  // ◙‿◙
+  private[datas] def buildJoint(a: A[Reference], b: B[Reference]): Joined[Reference]
+  private[datas] def kind: String
 }
 
 object JoinKind {

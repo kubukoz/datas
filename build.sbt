@@ -15,14 +15,16 @@ inThisBuild(
 )
 
 val compilerPlugins = List(
-  compilerPlugin("org.scalamacros" % "paradise" % "2.1.1").cross(CrossVersion.full),
-  compilerPlugin("org.typelevel" %% "kind-projector" % "0.10.3"),
-  compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
+  compilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full),
+  compilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVersion.full),
+  compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
+  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.1" cross CrossVersion.full)
 )
 
 val commonSettings = Seq(
   scalaVersion := "2.12.10",
-  scalacOptions ~= (_.filterNot(_ == "-Xfatal-warnings")),
+  scalacOptions -= "-Xfatal-warnings",
+  scalacOptions += "-P:typed-holes:log-level:info",
   name := "datas",
   updateOptions := updateOptions.value.withGigahorse(false),
   libraryDependencies ++= Seq(
