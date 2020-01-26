@@ -2,8 +2,6 @@ package tests
 
 import doobie.Transactor
 import doobie.implicits._
-import flawless.dsl._
-import flawless.predicates.all._
 import cats.effect.{test => _, _}
 import cats.implicits._
 import cats.~>
@@ -11,15 +9,15 @@ import fs2.Pipe
 import cats.Show
 import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
-import flawless.data.Suite
-import flawless.data.Assertion
 import cats.Apply
 import datas.tagless.TraverseK
 import datas.Query
 import datas.Reference
-import flawless.SuiteClass
+import flawless._
+import flawless.data.Assertion
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
+  import flawless.syntax._
 
   implicit def showTuple3[A: Show, B: Show, C: Show]: Show[(A, B, C)] = {
     case (a, b, c) => show"($a, $b, $c)"
@@ -372,21 +370,19 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     expectedList: Queried*
   )(
     implicit xa: Transactor[IO]
-  ): IO[NonEmptyList[Assertion]] = {
+  ): IO[Assertion] = {
     val showQuery =
       if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}"))
       else IO.unit
 
     showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
-        Assertion
-          .Failed(
-            show"""An exception occured, but ${expectedList.toList} was expected.
+        Assertion.failed(
+          show"""An exception occured, but ${expectedList.toList} was expected.
               |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
               |Compiled: ${q.compileSql.sql}
               |Exception message: ${exception.getMessage}""".stripMargin
-          )
-          .pure[NonEmptyList]
+        )
       case Right(values) => ensure(values, equalTo(expectedList.toList))
     }
   }

@@ -8,14 +8,12 @@ import cats.effect.IO
 import cats.effect.IOApp
 import cats.effect.Resource
 import doobie.hikari.HikariTransactor
-import flawless._
 import cats.implicits._
 import doobie.Transactor
 import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
-import flawless.TestApp
-import flawless.data.Suite
+import flawless._
 
 object DatasTests extends IOApp with TestApp {
 
