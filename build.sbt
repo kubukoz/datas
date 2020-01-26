@@ -2,7 +2,9 @@ inThisBuild(
   List(
     organization := "com.kubukoz",
     homepage := Some(url("https://github.com/kubukoz/datas")),
-    licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
+    licenses := List(
+      "Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")
+    ),
     developers := List(
       Developer(
         "kubukoz",
@@ -47,10 +49,11 @@ val tests = project
   .settings(
     fork := true,
     libraryDependencies ++= Seq(
-      "com.kubukoz" %% "flawless-core" % "0.1.0-M4",
+      "com.kubukoz" %% "flawless-core" % "0.1.0-M5",
       "com.lihaoyi" %% "pprint" % "0.5.5"
     )
   )
   .dependsOn(core)
 
-val datas = project.in(file(".")).settings(commonSettings).settings(skip in publish := true).dependsOn(core).aggregate(core)
+val datas =
+  project.in(file(".")).settings(commonSettings).settings(skip in publish := true).dependsOn(core).aggregate(core)

@@ -17,8 +17,9 @@ import cats.Apply
 import datas.tagless.TraverseK
 import datas.Query
 import datas.Reference
+import flawless.SuiteClass
 
-final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
+final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
 
   implicit def showTuple3[A: Show, B: Show, C: Show]: Show[(A, B, C)] = {
     case (a, b, c) => show"($a, $b, $c)"
@@ -35,12 +36,13 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
     A8: Show,
     A9: Show
   ]: Show[(A1, A2, A3, A4, A5, A6, A7, A8, A9)] = {
-    case (a, b, c, d, e, f, g, h, i) => show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
+    case (a, b, c, d, e, f, g, h, i) =>
+      show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
   }
 
   import datas.ops._
 
-  def run: Suite[IO] =
+  def runSuite: Suite[IO] =
     suite("BasicQueryTests") {
       (
         singleColumnTests
@@ -165,11 +167,16 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
           }
 
         expectAllToBe(q)(
-          List((true, Some(5L), false), (true, Some(5L), false), (true, Some(5L), false)): _*
+          List(
+            (true, Some(5L), false),
+            (true, Some(5L), false),
+            (true, Some(5L), false)
+          ): _*
         )
       },
       test("select all from user") {
-        val q = User.schema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
+        val q =
+          User.schema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
       }
@@ -204,7 +211,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         }
         .select {
           _.asTuple.leftMap(_.asTuple) match {
-            case ((user, book), bookParent) => (user.name, book.id, bookParent.id).tupled
+            case ((user, book), bookParent) =>
+              (user.name, book.id, bookParent.id).tupled
           }
         }
 
@@ -222,7 +230,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
         }
         .select {
           _.asTuple.map(_.asTuple) match {
-            case (user, (book, bookParent)) => (user.name, book.id, bookParent.id).tupled
+            case (user, (book, bookParent)) =>
+              (user.name, book.id, bookParent.id).tupled
           }
         }
 
@@ -353,7 +362,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   )
 
   val debugOn = false
-  def debug[A]: Pipe[IO, A, A] = if (debugOn) _.evalTap(s => IO(println(s))) else identity
+
+  def debug[A]: Pipe[IO, A, A] =
+    if (debugOn) _.evalTap(s => IO(println(s))) else identity
 
   def expectAllToBe[A[_[_]], Queried: Show: Diff](
     q: Query[A, Queried]
@@ -362,7 +373,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) {
   )(
     implicit xa: Transactor[IO]
   ): IO[NonEmptyList[Assertion]] = {
-    val showQuery = if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}")) else IO.unit
+    val showQuery =
+      if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}"))
+      else IO.unit
 
     showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>

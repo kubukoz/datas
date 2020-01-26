@@ -15,7 +15,7 @@ import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
 import flawless.TestApp
-import flawless.data.Suites
+import flawless.data.Suite
 
 object DatasTests extends IOApp with TestApp {
 
@@ -37,20 +37,26 @@ object DatasTests extends IOApp with TestApp {
     .widen[Transactor[IO]]
 
   override def run(args: List[String]): IO[ExitCode] = runTests(args) {
-    Suites.resource {
+    Suite.resource {
       transactor.map { implicit xa =>
-        new BasicJoinQueryTests().run.toSuites
+        new BasicJoinQueryTests().runSuite
       }
     }
   }
 
   private def fixedPool(size: Int) =
-    Resource.make(IO(Executors.newFixedThreadPool(size)))(ec => IO(ec.shutdown()))
+    Resource.make(IO(Executors.newFixedThreadPool(size)))(
+      ec => IO(ec.shutdown())
+    )
 
   private def runMigrations(fileName: String)(xa: Transactor[IO])(implicit blocker: Blocker): IO[Unit] = {
     val load = fs2
       .io
-      .readInputStream[IO](IO(getClass.getResourceAsStream(fileName)), 4096, blocker)
+      .readInputStream[IO](
+        IO(getClass.getResourceAsStream(fileName)),
+        4096,
+        blocker
+      )
       .through(fs2.text.utf8Decode[IO])
       .compile
       .foldMonoid
