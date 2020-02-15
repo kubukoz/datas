@@ -7,7 +7,6 @@ import cats.implicits._
 import cats.~>
 import fs2.Pipe
 import cats.Show
-import cats.data.NonEmptyList
 import com.softwaremill.diffx.Diff
 import cats.Apply
 import datas.tagless.TraverseK
@@ -101,12 +100,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         val q =
           User
             .schema
-            .select(
-              u =>
-                (
-                  u.name,
-                  u.age
-                ).tupled
+            .select(u =>
+              (
+                u.name,
+                u.age
+              ).tupled
             )
 
         expectAllToBe(q)(
@@ -120,12 +118,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         val q =
           User
             .schema
-            .select(
-              u =>
-                (
-                  equal(u.age, Reference.lift(23)),
-                  equal(Reference.lift(5), Reference.lift(10))
-                ).tupled
+            .select(u =>
+              (
+                equal(u.age, Reference.lift(23)),
+                equal(Reference.lift(5), Reference.lift(10))
+              ).tupled
             )
 
         expectAllToBe(q)(
@@ -139,12 +136,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         val q =
           User
             .schema
-            .select(
-              u =>
-                (
-                  u.name,
-                  u.age
-                ).tupled
+            .select(u =>
+              (
+                u.name,
+                u.age
+              ).tupled
             )
             .where(u => over(u.age, Reference.lift(24)))
             .where(u => nonEqual(u.name, Reference.lift("John")))
@@ -276,19 +272,18 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         .innerJoin(q) { (a, b) =>
           equal(a.left.left.left.userId, b.right.id)
         }
-        .select(
-          x =>
-            (
-              x.left.left.left.left.id,
-              x.left.left.left.right.id,
-              x.left.left.right.id,
-              x.left.right.id,
-              x.right.left.left.left.id,
-              x.right.left.left.right.id,
-              x.right.left.left.right.parentId,
-              x.right.left.right.id,
-              x.right.right.id
-            ).tupled
+        .select(x =>
+          (
+            x.left.left.left.left.id,
+            x.left.left.left.right.id,
+            x.left.left.right.id,
+            x.left.right.id,
+            x.right.left.left.left.id,
+            x.right.left.left.right.id,
+            x.right.left.left.right.parentId,
+            x.right.left.right.id,
+            x.right.right.id
+          ).tupled
         )
 
       expectAllToBe(superQ)(
@@ -393,7 +388,9 @@ import datas.QueryBase
 final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
 
 object User {
+
   implicit val traverseK: TraverseK[User] = new TraverseK[User] {
+
     override def traverseK[F[_], G[_]: Apply, H[_]](alg: User[F])(fk: F ~> λ[a => G[H[a]]]): G[User[H]] =
       (fk(alg.id), fk(alg.name), fk(alg.age)).mapN(User[H])
   }
@@ -410,7 +407,9 @@ object User {
 final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Long]], name: F[String])
 
 object Book {
+
   implicit val sequenceK: TraverseK[Book] = new TraverseK[Book] {
+
     override def traverseK[F[_], G[_]: Apply, H[_]](alg: Book[F])(fk: F ~> λ[a => G[H[a]]]): G[Book[H]] =
       (fk(alg.id), fk(alg.userId), fk(alg.parentId), fk(alg.name)).mapN(Book[H])
   }
