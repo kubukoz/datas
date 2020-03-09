@@ -36,7 +36,7 @@ val commonSettings = Seq(
     "org.typelevel" %% "simulacrum" % "1.0.0",
     "org.typelevel" %% "cats-effect" % "2.1.2",
     "org.typelevel" %% "cats-tagless-macros" % "0.11",
-    "org.typelevel" %% "cats-mtl-core" % "0.7.0",
+    "org.typelevel" %% "cats-mtl-core" % "0.7.1",
     "co.fs2" %% "fs2-core" % "2.2.2"
   ) ++ compilerPlugins
 )
