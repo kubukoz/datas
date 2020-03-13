@@ -60,4 +60,15 @@ object tagless {
   final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
     def asTuple: (A[F], B[F]) = (left, right)
   }
+
+  object Tuple2KK {
+
+    import TraverseK.ops._
+
+    implicit def traverseK[A[_[_]]: TraverseK, B[_[_]]: TraverseK]: TraverseK[Tuple2KK[A, B, *[_]]] = new TraverseK[Tuple2KK[A, B, *[_]]] {
+
+      def traverseK[F[_], G[_]: Apply, H[_]](alg: Tuple2KK[A, B, F])(fk: F ~> λ[a => G[H[a]]]): G[Tuple2KK[A, B, H]] =
+        (alg.left.traverseK(fk), alg.right.traverseK(fk)).mapN(Tuple2KK(_, _))
+    }
+  }
 }

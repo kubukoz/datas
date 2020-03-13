@@ -1,4 +1,5 @@
 package datas
+
 import cats.implicits._
 import doobie.util.fragment.Fragment
 import doobie._
@@ -95,7 +96,7 @@ private[datas] final case class CompiledReference[Type](frag: Fragment, readOrGe
   def rmap[T2](f: Either[Get[Type], Read[Type]] => T2): (Fragment, T2) = (frag, f(readOrGet))
 
   def ermap[T2](f: Either[Get[Type], Read[Type]] => Either[Get[T2], Read[T2]]): CompiledReference[T2] =
-    CompiledReference(frag, f(readOrGet))
+    (CompiledReference.apply[T2] _).tupled(rmap(f))
 
   def map[T2](f: Type => T2): CompiledReference[T2] = ermap(_.bimap(_.map(f), _.map(f)))
 }

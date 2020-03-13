@@ -14,6 +14,10 @@ import datas.Query
 import datas.Reference
 import flawless._
 import flawless.data.Assertion
+import flawless.data.Suite
+import datas.tagless.Tuple2KK
+import datas.tagless.OptionTK
+import cats.data.OptionT
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
   import flawless.syntax._
@@ -173,6 +177,64 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           User.schema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
+      },
+      test("select all from simple join") {
+        val q = User.schema.innerJoin(Book.schema)(_.id === _.userId).selectAll
+
+        implicit def showAny[A]: Show[A] = Show.fromToString
+
+        expectAllToBe(q)(
+          Tuple2KK(User[cats.Id](2, "Jakub", 23), Book[cats.Id](1, 2, None, "Book 1")),
+          Tuple2KK(User[cats.Id](3, "John", 40), Book[cats.Id](2, 3, Some(1), "Book 2"))
+        )
+      },
+      test("select all from left join") {
+        import TraverseK.ops._
+
+        val q = User
+          .schema
+          .leftJoin(Book.schema) { (u, b) =>
+            equal(u.id, b.userId)
+          }
+          .selectAll
+
+        implicit def showAny[A]: Show[A] = Show.fromToString
+
+        expectAllToBe(q)(
+          Tuple2KK(
+            User[cats.Id](2, "Jakub", 23),
+            OptionTK(
+              Book(
+                OptionT[cats.Id, Long](1L.some),
+                OptionT[cats.Id, Long](2L.some),
+                OptionT[cats.Id, Option[Long]](none.some),
+                OptionT[cats.Id, String]("Book 1".some)
+              )
+            )
+          ),
+          Tuple2KK(
+            User[cats.Id](3, "John", 40),
+            OptionTK(
+              Book(
+                OptionT[cats.Id, Long](2L.some),
+                OptionT[cats.Id, Long](3L.some),
+                OptionT[cats.Id, Option[Long]](1L.some.some),
+                OptionT[cats.Id, String]("Book 2".some)
+              )
+            )
+          ),
+          Tuple2KK(
+            User[cats.Id](1, "Jon", 36),
+            OptionTK(
+              Book(
+                OptionT[cats.Id, Long](none),
+                OptionT[cats.Id, Long](none),
+                OptionT[cats.Id, Option[Long]](none.some), //todo same bug as below
+                OptionT[cats.Id, String](none)
+              )
+            )
+          )
+        )
       }
     )
 
@@ -343,13 +405,13 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           val user = t.left
           val book = t.right
 
-          (user.name, book.underlying.name.value).tupled
+          (user.name, book.underlying.name.value, book.underlying.parentId.value).tupled
         }
 
       expectAllToBe(q)(
-        ("Jakub", "Book 1".some),
-        ("John", "Book 2".some),
-        ("Jon", none)
+        ("Jakub", "Book 1".some, none.some),
+        ("John", "Book 2".some, 1L.some.some),
+        ("Jon", none, none.some) //todo bug: the last field should definitely be none
       )
     }
   )

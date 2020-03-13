@@ -23,12 +23,15 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   ): QueryBase[JoinKind.Inner[A, B]#Out] =
     join(another)(_.inner)(onClause)
 
-  def leftJoin[B[_[_]]: FunctorK](
+  def leftJoin[B[_[_]]](
     another: QueryBase[B]
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Left[A, B]#Out] =
-    join(another)(_.left)(onClause)
+    join(another) { k =>
+      implicit val rightFunctorK: FunctorK[B] = buildTraverseK(another)
+      k.left
+    }(onClause)
 
   private def join[B[_[_]], Joined[_[_]]](
     another: QueryBase[B]
@@ -39,15 +42,16 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   ): QueryBase[Joined] =
     QueryBase.Join(this, another, how(JoinKind), onClause)
 
-  def selectAll: Query[A, A[cats.Id]] = select { aref =>
-    this match {
-      case ft: QueryBase.FromTable[A] => ft.traverseK.sequenceKId(aref)
-      case _                          => throw new Exception("select * isn't supported on joins yet")
-    }
-  }
+  def selectAll: Query[A, A[cats.Id]] =
+    select(buildTraverseK(this).sequenceKId(_))
 
   def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
     Query(this, selection, filters = Chain.empty)
+
+  private def buildTraverseK[B[_[_]]](self: QueryBase[B]): TraverseK[B] = self match {
+    case ft: QueryBase.FromTable[a]         => ft.traverseK
+    case join: QueryBase.Join[a, b, joined] => join.kind.deriveTraverseK(buildTraverseK(join.left), buildTraverseK(join.right))
+  }
 }
 
 private[datas] object QueryBase {

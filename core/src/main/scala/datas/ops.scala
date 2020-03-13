@@ -8,6 +8,11 @@ object ops {
     def >=(another: Reference[Type]): Reference[Boolean] = over(self, another)
     def <=(another: Reference[Type]): Reference[Boolean] = another >= self
     def ===(another: Reference[Type]): Reference[Boolean] = equal(self, another)
+
+    def ||(another: Reference[Boolean])(implicit isBool: Type =:= Boolean): Reference[Boolean] = {
+      val _ = isBool
+      binary(_ ++ fr"or" ++ _)(self, another)
+    }
   }
 
   implicit final class LiftAny[Type](private val self: Type) extends AnyVal {
