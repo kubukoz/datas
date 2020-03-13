@@ -21,7 +21,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Inner[A, B]#Out] =
-    join(another) { _.inner }(onClause)
+    join(another)(_.inner)(onClause)
 
   def leftJoin[B[_[_]]](
     another: QueryBase[B]
