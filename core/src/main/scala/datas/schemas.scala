@@ -4,7 +4,7 @@ import cats.implicits._
 import doobie._
 import cats.~>
 import cats.tagless.implicits._
-import datas.tagless.InvariantTraverseK
+import datas.tagless.TraverseK
 import datas.QueryBase.TableName
 
 object schemas {
@@ -12,8 +12,8 @@ object schemas {
   def column[Type: Get](name: String): ColumnK[Type] =
     ColumnK.Named(Column(name), Get[Type])
 
-  def caseClassSchema[F[_[_]]: InvariantTraverseK](name: String, columns: F[ColumnK]): QueryBase[F] =
-    QueryBase.FromTable(TableName(name), columns.mapK(columnKToReference), InvariantTraverseK[F])
+  def caseClassSchema[F[_[_]]: TraverseK](name: String, columns: F[ColumnK]): QueryBase[F] =
+    QueryBase.FromTable(TableName(name), columns.mapK(columnKToReference), TraverseK[F])
 
   private val columnKToReference: ColumnK ~> Reference = λ[ColumnK ~> Reference] {
     case ColumnK.Named(name, get) =>

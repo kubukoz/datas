@@ -1,12 +1,16 @@
 package tests
 
+import java.util.concurrent.Executors
+
 import cats.effect.Blocker
 import cats.effect.ExitCode
 import cats.effect.IO
 import cats.effect.IOApp
+import cats.effect.Resource
 import doobie.hikari.HikariTransactor
 import cats.implicits._
 import doobie.Transactor
+import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
 import flawless._
