@@ -10,6 +10,7 @@ import cats.data.OptionT
 import cats.Applicative
 import cats.free.FreeApplicative
 import cats.data.Nested
+import scala.annotation.tailrec
 
 sealed trait ReferenceData[Type] extends Product with Serializable
 
@@ -108,14 +109,15 @@ object CompiledGet {
   final case class NullableGet[A](underlying: CompiledGet[A]) extends CompiledGet[Option[A]]
 
   val toRead: CompiledGet ~> Read = {
-    def readNullable[a]: CompiledGet[a] => Read[Option[a]] = {
-      case JustGet(underlying) => Read.fromGetOption(underlying)
-      case ng: NullableGet[c]  => readNullable(ng.underlying).nested.map(_.some).value
+    @tailrec
+    def readNullable[a, b](get: CompiledGet[a])(f: Option[a] => Option[b]): Read[Option[b]] = get match {
+      case JustGet(underlying) => Read.fromGetOption(underlying).map(f)
+      case ng: NullableGet[c]  => readNullable(ng.underlying)(a => f(a.map(_.some)))
     }
 
     λ[CompiledGet ~> Read] {
       case JustGet(a)         => Read.fromGet(a)
-      case ng: NullableGet[a] => readNullable(ng.underlying)
+      case ng: NullableGet[a] => readNullable(ng.underlying)(identity)
     }
   }
 
