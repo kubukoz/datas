@@ -46,14 +46,19 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
 
   def runSuite: Suite[IO] =
     suite("BasicQueryTests") {
-      NonEmptyList
-        .of(
-          singleColumnTests,
-          singleTableTests,
-          innerJoinTests,
-          leftJoinTests
-        )
-        .reduce
+      // NonEmptyList
+      //   .of(
+      //     singleColumnTests,
+      //     singleTableTests,
+      //     innerJoinTests,
+      //     leftJoinTests
+      //   )
+      //   .reduce
+      test("select constant filtering on mapped lift") {
+        val q = User.schema.select(_.age).where(_ => Reference.lift(1).imap(_ === 1)(_ => 1))
+
+        expectAllToBe(q)(1, 1, 1)
+      }
     }
 
   def singleColumnTests =
@@ -69,7 +74,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         expectAllToBe(q)(36, 23, 40)
       },
       test("select + map") {
-        val q = User.schema.select(_.name.map(_ + "X"))
+        val q = User.schema.select(_.name.imap(_ + "X")(_.init))
 
         expectAllToBe(q)("JonX", "JakubX", "JohnX")
       },
@@ -79,9 +84,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         expectAllToBe(q)(1, 1, 1)
       },
       test("select lifted + mapped constant") {
-        val q = User.schema.select(_ => Reference.lift(1).map(_ + 1))
+        val q = User.schema.select(_ => Reference.lift(1).imap(_ + 1)(_ - 1))
 
         expectAllToBe(q)(2, 2, 2)
+      },
+      test("select constant filtering on mapped lift") {
+        val q = User.schema.select(_ => Reference.lift(1)).where(_ => Reference.lift(1).imap(_ === 1)(_ => 1))
+
+        expectAllToBe(q)(1, 1, 1)
       },
       test("select option-lifted constant") {
         val q = User.schema.select(_ => Reference.liftOption(Reference.lift(1)))
@@ -163,7 +173,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
             (
               Reference.lift(true),
               Reference.liftOption(Reference.lift(5L)),
-              u.age.as(false)
+              u.age.imap(_ => false)(_ => 0)
             ).tupled
           }
 
@@ -265,7 +275,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           equal(u.id, b.userId)
         }
         .innerJoin(Book.schema) { (t, b) =>
-          equal(t.right.parentId, b.id.map(_.some))
+          equal(t.right.parentId, b.id.imap(_.some)(_.get))
         }
         .select {
           _.asTuple.leftMap(_.asTuple) match {

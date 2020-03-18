@@ -1,7 +1,6 @@
 package datas
 
 import cats.tagless.FunctorK
-import cats.Apply
 import cats.arrow.FunctionK
 import cats.~>
 import cats.data.OptionT
@@ -28,7 +27,7 @@ object tagless {
     /**
       * Like [[isequenceK]], but with the second effect hardcoded to [[cats.Id]] for better inference.
       * */
-    def isequenceKId[F[_]: Apply](alg: Alg[F]): F[Alg[cats.Id]] = isequenceK[F, cats.Id](alg)
+    def isequenceKId[F[_]: InvariantSemigroupal](alg: Alg[F]): F[Alg[cats.Id]] = isequenceK[F, cats.Id](alg)
   }
 
   // An option transformer for higher-kinded types

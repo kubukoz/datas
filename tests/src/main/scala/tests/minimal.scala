@@ -35,6 +35,4 @@ object minimal {
   import datas.Reference.lift
 
   val q: ConnectionIO[List[String]] = User.schema.select(_.name).where(_.age >= lift(18)).compileSql.to[List]
-
-  val qWhole: ConnectionIO[List[User[cats.Id]]] = User.schema.selectAll.where(_.age >= lift(18)).compileSql.to[List]
 }
