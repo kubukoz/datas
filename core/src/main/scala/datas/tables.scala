@@ -29,7 +29,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Left[A, B]#Out] =
     join(another) { k =>
-      implicit val rightFunctorK: FunctorK[B] = buildTraverseK(another)
+      implicit val rightFunctorK: FunctorK[B] = another.traverseK
       k.left
     }(onClause)
 
@@ -43,15 +43,12 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     QueryBase.Join(this, another, how(JoinKind), onClause)
 
   def selectAll: Query[A, A[cats.Id]] =
-    select(buildTraverseK(this).sequenceKId(_))
+    select(this.traverseK.sequenceKId(_))
 
   def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
     Query(this, selection, filters = Chain.empty)
 
-  private def buildTraverseK[B[_[_]]](self: QueryBase[B]): TraverseK[B] = self match {
-    case ft: QueryBase.FromTable[a]         => ft.traverseK
-    case join: QueryBase.Join[a, b, joined] => join.kind.deriveTraverseK(buildTraverseK(join.left), buildTraverseK(join.right))
-  }
+  def traverseK: TraverseK[A]
 }
 
 private[datas] object QueryBase {
@@ -62,7 +59,9 @@ private[datas] object QueryBase {
     right: QueryBase[B],
     kind: JoinKind[A, B, Joined],
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
-  ) extends QueryBase[Joined]
+  ) extends QueryBase[Joined] {
+    val traverseK: TraverseK[Joined] = kind.deriveTraverseK(left.traverseK, right.traverseK)
+  }
 
   /**
     * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).

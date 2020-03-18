@@ -28,7 +28,9 @@ final case class Query[A[_[_]], Queried](
         filters.map(_.apply(compiledReference).compile.frag).toList: _*
       )
 
-    implicit val read: Read[Queried] = compiledSelection.readOrGet.fold(Read.fromGet(_), identity)
+    import CompiledGet.applicativeRead
+
+    implicit val read: Read[Queried] = compiledSelection.get.foldMap(CompiledGet.toRead)
 
     frag.query[Queried]
   }

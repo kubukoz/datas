@@ -11,6 +11,7 @@ sealed trait JoinKind[A[_[_]], B[_[_]], Joined[_[_]]] {
   // ◙‿◙
   private[datas] def buildJoint(a: A[Reference], b: B[Reference]): Joined[Reference]
   private[datas] def kind: String
+  //todo should this be inlined? We need some constraints anyway and the instance should have all of them too
   private[datas] def deriveTraverseK(left: TraverseK[A], right: TraverseK[B]): TraverseK[Joined]
 }
 

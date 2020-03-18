@@ -15,7 +15,9 @@ object minimal {
 
   // Ideally I can derive these instances at compile-time for you
   object User {
+
     implicit val traverseK: TraverseK[User] = new TraverseK[User] {
+
       override def traverseK[F[_], G[_]: Apply, H[_]](alg: User[F])(fk: F ~> λ[a => G[H[a]]]): G[User[H]] =
         (fk(alg.id), fk(alg.name), fk(alg.age)).mapN(User[H])
     }

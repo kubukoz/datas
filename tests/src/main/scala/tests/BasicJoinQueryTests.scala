@@ -18,6 +18,7 @@ import flawless.data.Suite
 import datas.tagless.Tuple2KK
 import datas.tagless.OptionTK
 import cats.data.OptionT
+import cats.data.NonEmptyList
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
   import flawless.syntax._
@@ -45,12 +46,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
 
   def runSuite: Suite[IO] =
     suite("BasicQueryTests") {
-      (
-        singleColumnTests
-          |+| singleTableTests
-          |+| innerJoinTests
-          |+| leftJoinTests
-      )
+      NonEmptyList
+        .of(
+          singleColumnTests,
+          singleTableTests,
+          innerJoinTests,
+          leftJoinTests
+        )
+        .reduce
     }
 
   def singleColumnTests =
@@ -189,7 +192,6 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         )
       },
       test("select all from left join") {
-        import TraverseK.ops._
 
         val q = User
           .schema
@@ -207,7 +209,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
               Book(
                 OptionT[cats.Id, Long](1L.some),
                 OptionT[cats.Id, Long](2L.some),
-                OptionT[cats.Id, Option[Long]](none.some),
+                OptionT[cats.Id, Option[Long]](none),
                 OptionT[cats.Id, String]("Book 1".some)
               )
             )
@@ -229,7 +231,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
               Book(
                 OptionT[cats.Id, Long](none),
                 OptionT[cats.Id, Long](none),
-                OptionT[cats.Id, Option[Long]](none.some), //todo same bug as below
+                OptionT[cats.Id, Option[Long]](none),
                 OptionT[cats.Id, String](none)
               )
             )
@@ -394,29 +396,42 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     }
   )
 
-  def leftJoinTests = tests(
-    test("left join users and books") {
-      val q = User
-        .schema
-        .leftJoin(Book.schema) { (u, b) =>
-          equal(u.id, b.userId)
-        }
-        .select { t =>
-          val user = t.left
-          val book = t.right
+  def leftJoinTests =
+    tests(
+      test("left join users and books") {
+        val q = User
+          .schema
+          .leftJoin(Book.schema) { (u, b) =>
+            equal(u.id, b.userId)
+          }
+          .select { t =>
+            val user = t.left
+            val book = t.right
 
-          (user.name, book.underlying.name.value, book.underlying.parentId.value).tupled
-        }
+            (user.name, book.underlying.name.value, book.underlying.parentId.value).tupled
+          }
 
-      expectAllToBe(q)(
-        ("Jakub", "Book 1".some, none.some),
-        ("John", "Book 2".some, 1L.some.some),
-        ("Jon", none, none.some) //todo bug: the last field should definitely be none
-      )
-    }
-  )
+        expectAllToBe(q)(
+          ("Jakub", "Book 1".some, none),
+          ("John", "Book 2".some, 1L.some.some),
+          ("Jon", none, none)
+        )
+      },
+      test("#53 - joining on an optional field results in Some(None)") {
+        val q = User
+          .schema
+          .leftJoin(Book.schema) { (u, b) =>
+            equal(u.id, b.userId)
+          }
+          .select { a =>
+            a.right.underlying.parentId.value
+          }
 
-  val debugOn = false
+        expectAllToBe(q)(none, 1L.some.some, none)
+      }
+    )
+
+  var debugOn = false
 
   def debug[A]: Pipe[IO, A, A] =
     if (debugOn) _.evalTap(s => IO(println(s))) else identity
@@ -427,23 +442,18 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     expectedList: Queried*
   )(
     implicit xa: Transactor[IO]
-  ): IO[Assertion] = {
-    val showQuery =
-      if (debugOn) IO(println(show"Testing query: ${q.compileSql.sql}"))
-      else IO.unit
-
-    showQuery *> q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
+  ): IO[Assertion] =
+    q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
       case Left(exception) =>
         Assertion.failed(
           show"""An exception occured, but ${expectedList.toList} was expected.
-              |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
-              |Compiled: ${q.compileSql.sql}
-              |Exception message: ${exception.getMessage}""".stripMargin
-        )
+        |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
+        |Compiled: ${q.compileSql.sql}""".stripMargin
+        ) |+| Assertion.thrown(exception)
       case Right(values) => ensure(values, equalTo(expectedList.toList))
     }
-  }
 }
+
 import datas.schemas._
 import datas.QueryBase
 

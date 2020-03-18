@@ -43,9 +43,7 @@ object DatasTests extends IOApp with TestApp {
   }
 
   private def fixedPool(size: Int) =
-    Resource.make(IO(Executors.newFixedThreadPool(size)))(
-      ec => IO(ec.shutdown())
-    )
+    Resource.make(IO(Executors.newFixedThreadPool(size)))(ec => IO(ec.shutdown()))
 
   private def runMigrations(fileName: String)(xa: Transactor[IO])(implicit blocker: Blocker): IO[Unit] = {
     val load = fs2
