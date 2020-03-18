@@ -8,8 +8,7 @@ import cats.~>
 import fs2.Pipe
 import cats.Show
 import com.softwaremill.diffx.Diff
-import cats.Apply
-import datas.tagless.TraverseK
+import datas.tagless.InvariantTraverseK
 import datas.Query
 import datas.Reference
 import flawless._
@@ -19,6 +18,7 @@ import datas.tagless.Tuple2KK
 import datas.tagless.OptionTK
 import cats.data.OptionT
 import cats.data.NonEmptyList
+import cats.InvariantSemigroupal
 
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
   import flawless.syntax._
@@ -177,7 +177,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
       },
       test("select all from user") {
         val q =
-          User.schema.selectAll.where(u => equal(u.name, Reference.lift("Jon")))
+          User.schema.selectAll.where(_.name === Reference.lift("Jon"))
 
         expectAllToBe(q)(User[cats.Id](1L, "Jon", 36))
       },
@@ -461,10 +461,10 @@ final case class User[F[_]](id: F[Long], name: F[String], age: F[Int])
 
 object User {
 
-  implicit val traverseK: TraverseK[User] = new TraverseK[User] {
+  implicit val itraverseK: InvariantTraverseK[User] = new InvariantTraverseK[User] {
 
-    override def traverseK[F[_], G[_]: Apply, H[_]](alg: User[F])(fk: F ~> λ[a => G[H[a]]]): G[User[H]] =
-      (fk(alg.id), fk(alg.name), fk(alg.age)).mapN(User[H])
+    override def itraverseK[F[_], G[_]: InvariantSemigroupal, H[_]](alg: User[F])(fk: F ~> λ[a => G[H[a]]]): G[User[H]] =
+      (fk(alg.id), fk(alg.name), fk(alg.age)).imapN(User[H])(u => (u.id, u.name, u.age))
   }
 
   val schema: QueryBase[User] =
@@ -480,10 +480,10 @@ final case class Book[F[_]](id: F[Long], userId: F[Long], parentId: F[Option[Lon
 
 object Book {
 
-  implicit val sequenceK: TraverseK[Book] = new TraverseK[Book] {
+  implicit val isequenceK: InvariantTraverseK[Book] = new InvariantTraverseK[Book] {
 
-    override def traverseK[F[_], G[_]: Apply, H[_]](alg: Book[F])(fk: F ~> λ[a => G[H[a]]]): G[Book[H]] =
-      (fk(alg.id), fk(alg.userId), fk(alg.parentId), fk(alg.name)).mapN(Book[H])
+    override def itraverseK[F[_], G[_]: InvariantSemigroupal, H[_]](alg: Book[F])(fk: F ~> λ[a => G[H[a]]]): G[Book[H]] =
+      (fk(alg.id), fk(alg.userId), fk(alg.parentId), fk(alg.name)).imapN(Book[H])(b => (b.id, b.userId, b.parentId, b.name))
   }
 
   val schema: QueryBase[Book] =

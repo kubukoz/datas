@@ -10,7 +10,7 @@ import cats.tagless.implicits._
 import cats.mtl.instances.all._
 import cats.FlatMap
 import cats.data.NonEmptyChain
-import datas.tagless.TraverseK
+import datas.tagless.InvariantTraverseK
 import datas.QueryBase.TableName
 import scala.annotation.tailrec
 
@@ -25,8 +25,8 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Inner[A, B]#Out] =
     join(another) {
-      implicit val thisTraverseK = traverseK
-      implicit val thatTraverseK = another.traverseK
+      implicit val thisTraverseK = itraverseK
+      implicit val thatTraverseK = another.itraverseK
       _.inner
     }(onClause)
 
@@ -36,8 +36,8 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Left[A, B]#Out] =
     join(another) {
-      implicit val thisTraverseK = traverseK
-      implicit val thatTraverseK = another.traverseK
+      implicit val thisTraverseK = itraverseK
+      implicit val thatTraverseK = another.itraverseK
       _.left
     }(onClause)
 
@@ -51,12 +51,12 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     QueryBase.Join(this, another, how(JoinKind), onClause)
 
   def selectAll: Query[A, A[cats.Id]] =
-    select(this.traverseK.sequenceKId(_))
+    select(this.itraverseK.isequenceKId(_))
 
   def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
     Query(this, selection, filters = Chain.empty)
 
-  private[datas] def traverseK: TraverseK[A]
+  private[datas] def itraverseK: InvariantTraverseK[A]
 
   //public API? (diagnostics)
   //todo: use to see if any of the tables appears more than once
@@ -73,7 +73,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 }
 
 private[datas] object QueryBase {
-  final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], traverseK: TraverseK[A]) extends QueryBase[A]
+  final case class FromTable[A[_[_]]](table: TableName, lifted: A[Reference], itraverseK: InvariantTraverseK[A]) extends QueryBase[A]
 
   final case class Join[A[_[_]], B[_[_]], Joined[_[_]]](
     left: QueryBase[A],
@@ -81,7 +81,7 @@ private[datas] object QueryBase {
     kind: JoinKind[A, B, Joined],
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ) extends QueryBase[Joined] {
-    val traverseK: TraverseK[Joined] = kind.traverseK
+    val itraverseK: InvariantTraverseK[Joined] = kind.itraverseK
   }
 
   /**
@@ -89,7 +89,7 @@ private[datas] object QueryBase {
     */
   def compileQuery[A[_[_]], F[_]: IndexState: FlatMap]: QueryBase[A] => F[(Fragment, A[Reference])] = {
     case t: FromTable[A] =>
-      implicit val functorK: FunctorK[A] = t.traverseK
+      implicit val functorK: FunctorK[A] = t.itraverseK
       IndexState.newIndex[F].map { index =>
         val scope = t.table.indexed(index).name
         (
