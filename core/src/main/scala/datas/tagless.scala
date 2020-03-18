@@ -56,7 +56,7 @@ object tagless {
     }
   }
 
-  // A tuple2 of higher-kinded types.
+  // A tuple2 of algebras in the same effect.
   final case class Tuple2KK[A[_[_]], B[_[_]], F[_]](left: A[F], right: B[F]) {
     def asTuple: (A[F], B[F]) = (left, right)
   }
