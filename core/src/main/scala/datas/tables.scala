@@ -9,7 +9,10 @@ import cats.tagless.FunctorK
 import cats.tagless.implicits._
 import cats.mtl.instances.all._
 import cats.FlatMap
+import cats.data.NonEmptyChain
 import datas.tagless.TraverseK
+import datas.QueryBase.TableName
+import scala.annotation.tailrec
 
 /**
   * QueryBase: a thing you can query from. It'll usually be a table or a join thereof.
@@ -49,6 +52,19 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     Query(this, selection, filters = Chain.empty)
 
   def traverseK: TraverseK[A]
+
+  //public API? (diagnostics)
+  //todo: use to see if any of the tables appears more than once
+  private[datas] def tableNames: NonEmptyChain[TableName] = {
+    @tailrec
+    def go[s[_[_]]](stack: List[QueryBase[s]], memory: Chain[TableName]): NonEmptyChain[TableName] = stack match {
+      case Nil                                  => NonEmptyChain.fromChainUnsafe(memory) //totally safe
+      case (t: QueryBase.FromTable[_]) :: tail  => go[Any](tail, memory.append(t.table))
+      case (j: QueryBase.Join[_, _, _]) :: tail => go[Any](j.left :: j.right :: tail, memory)
+    }
+
+    go(this :: Nil, Chain.nil)
+  }
 }
 
 private[datas] object QueryBase {
