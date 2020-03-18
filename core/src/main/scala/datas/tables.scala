@@ -24,16 +24,21 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Inner[A, B]#Out] =
-    join(another)(_.inner)(onClause)
+    join(another) {
+      implicit val thisTraverseK = traverseK
+      implicit val thatTraverseK = another.traverseK
+      _.inner
+    }(onClause)
 
   def leftJoin[B[_[_]]](
     another: QueryBase[B]
   )(
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ): QueryBase[JoinKind.Left[A, B]#Out] =
-    join(another) { k =>
-      implicit val rightFunctorK: FunctorK[B] = another.traverseK
-      k.left
+    join(another) {
+      implicit val thisTraverseK = traverseK
+      implicit val thatTraverseK = another.traverseK
+      _.left
     }(onClause)
 
   private def join[B[_[_]], Joined[_[_]]](
@@ -51,7 +56,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
   def select[Queried](selection: A[Reference] => Reference[Queried]): Query[A, Queried] =
     Query(this, selection, filters = Chain.empty)
 
-  def traverseK: TraverseK[A]
+  private[datas] def traverseK: TraverseK[A]
 
   //public API? (diagnostics)
   //todo: use to see if any of the tables appears more than once
@@ -76,7 +81,7 @@ private[datas] object QueryBase {
     kind: JoinKind[A, B, Joined],
     onClause: (A[Reference], B[Reference]) => Reference[Boolean]
   ) extends QueryBase[Joined] {
-    val traverseK: TraverseK[Joined] = kind.deriveTraverseK(left.traverseK, right.traverseK)
+    val traverseK: TraverseK[Joined] = kind.traverseK
   }
 
   /**
