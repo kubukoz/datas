@@ -14,13 +14,14 @@ import scala.concurrent.ExecutionContext
 import doobie.util.fragment.Fragment
 import doobie.implicits._
 import flawless._
+import doobie.util.ExecutionContexts
 
 object DatasTests extends IOApp with TestApp {
 
-  val transactor = (Blocker[IO], fixedPool(10).map(ExecutionContext.fromExecutorService))
+  val transactor = (Blocker[IO], fixedPool(10))
     .tupled
     .flatMap {
-      case (implicit0(blocker: Blocker), boundedEc) =>
+      case (blocker, boundedEc) =>
         HikariTransactor
           .newHikariTransactor[IO](
             "org.postgresql.Driver",
@@ -30,7 +31,7 @@ object DatasTests extends IOApp with TestApp {
             boundedEc,
             blocker
           )
-          .evalTap(runMigrations("/init.sql"))
+          .evalTap(implicit xa => runMigrations("/init.sql", blocker))
     }
     .widen[Transactor[IO]]
 
@@ -43,9 +44,9 @@ object DatasTests extends IOApp with TestApp {
   }
 
   private def fixedPool(size: Int) =
-    Resource.make(IO(Executors.newFixedThreadPool(size)))(ec => IO(ec.shutdown()))
+    ExecutionContexts.fixedThreadPool[IO](size)
 
-  private def runMigrations(fileName: String)(xa: Transactor[IO])(implicit blocker: Blocker): IO[Unit] = {
+  private def runMigrations(fileName: String, blocker: Blocker)(implicit xa: Transactor[IO]): IO[Unit] = {
     val load = fs2
       .io
       .readInputStream[IO](

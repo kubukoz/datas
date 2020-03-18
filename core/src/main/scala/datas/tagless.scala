@@ -47,9 +47,8 @@ object tagless {
         alg
           .underlying
           .traverseK[H, OptionT[I, *]] {
-            new (OptionT[G, *] ~> λ[a => H[OptionT[I, a]]]) {
-              def apply[A](fa: OptionT[G, A]): H[OptionT[I, A]] =
-                optionTTraverseK[A].traverseK(fa)(fk)
+            λ[OptionT[G, *] ~> λ[a => H[OptionT[I, a]]]] {
+              case fa: OptionT[G, a] => optionTTraverseK[a].traverseK(fa)(fk)
             }
           }
           .map(OptionTK(_))
