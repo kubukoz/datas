@@ -20,7 +20,7 @@ val compilerPlugins = List(
   compilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full),
   compilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVersion.full),
   compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
-  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.2" cross CrossVersion.full)
+  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.3" cross CrossVersion.full)
 )
 
 val commonSettings = Seq(
