@@ -39,7 +39,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     A9: Show
   ]: Show[(A1, A2, A3, A4, A5, A6, A7, A8, A9)] = {
     case (a, b, c, d, e, f, g, h, i) =>
-      show"($a, $b, $c, $d, $e, $f, $g, $h, $i)"
+      NonEmptyList.of[cats.Show.Shown](a, b, c, d, e, f, g, h, i).map(_.toString).mkString_("(", ", ", ")")
   }
 
   import datas.ops._
@@ -193,12 +193,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
       },
       test("select all from left join") {
 
-        val q = User
-          .schema
-          .leftJoin(Book.schema) { (u, b) =>
-            equal(u.id, b.userId)
-          }
-          .selectAll
+        val q = User.schema.leftJoin(Book.schema)((u, b) => equal(u.id, b.userId)).selectAll
 
         implicit def showAny[A]: Show[A] = Show.fromToString
 
@@ -242,16 +237,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
 
   def innerJoinTests = tests(
     test("inner join users and books") {
-      val q = User
-        .schema
-        .innerJoin(Book.schema) { (u, b) =>
-          equal(u.id, b.userId)
+      val q = User.schema.innerJoin(Book.schema)((u, b) => equal(u.id, b.userId)).select {
+        _.asTuple match {
+          case (user, book) => (user.name, book.id).tupled
         }
-        .select {
-          _.asTuple match {
-            case (user, book) => (user.name, book.id).tupled
-          }
-        }
+      }
 
       expectAllToBe(q)(
         ("Jakub", 1L),
@@ -261,12 +251,8 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     test("(a join b) join c)") {
       val q = User
         .schema
-        .innerJoin(Book.schema) { (u, b) =>
-          equal(u.id, b.userId)
-        }
-        .innerJoin(Book.schema) { (t, b) =>
-          equal(t.right.parentId, b.id.map(_.some))
-        }
+        .innerJoin(Book.schema)((u, b) => equal(u.id, b.userId))
+        .innerJoin(Book.schema)((t, b) => equal(t.right.parentId, b.id.map(_.some)))
         .select {
           _.asTuple.leftMap(_.asTuple) match {
             case ((user, book), bookParent) =>
@@ -281,11 +267,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     test("a join (b join c)") {
       val q = User
         .schema
-        .innerJoin(Book.schema.innerJoin(Book.schema) { (b, bP) =>
-          equalOptionL(b.parentId, bP.id)
-        }) { (u, t) =>
-          equal(u.id, t.left.userId)
-        }
+        .innerJoin(Book.schema.innerJoin(Book.schema)((b, bP) => equalOptionL(b.parentId, bP.id)))((u, t) => equal(u.id, t.left.userId))
         .select {
           _.asTuple.map(_.asTuple) match {
             case (user, (book, bookParent)) =>
@@ -300,17 +282,11 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     test("(((a join b) join c) join d)") {
       val q = Book
         .schema
-        .innerJoin(Book.schema) { (b, bP) =>
-          equalOptionL(b.parentId, bP.id)
-        }
+        .innerJoin(Book.schema)((b, bP) => equalOptionL(b.parentId, bP.id))
         .innerJoin(
           User.schema
-        ) { (t, u) =>
-          equal(u.id, t.left.userId)
-        }
-        .innerJoin(User.schema) { (t, u) =>
-          equal(u.id, t.left.left.userId)
-        }
+        )((t, u) => equal(u.id, t.left.userId))
+        .innerJoin(User.schema)((t, u) => equal(u.id, t.left.left.userId))
         .select(_.right.id)
 
       expectAllToBe(q)(
@@ -320,22 +296,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     test("(((a join b) join c) join d) join (((e join f) join g) join h)") {
       val q = Book
         .schema
-        .innerJoin(Book.schema) { (b, bP) =>
-          equalOptionL(b.parentId, bP.id)
-        }
+        .innerJoin(Book.schema)((b, bP) => equalOptionL(b.parentId, bP.id))
         .innerJoin(
           User.schema
-        ) { (t, u) =>
-          equal(u.id, t.left.userId)
-        }
-        .innerJoin(User.schema) { (t, u) =>
-          equal(u.id, t.left.left.userId)
-        }
+        )((t, u) => equal(u.id, t.left.userId))
+        .innerJoin(User.schema)((t, u) => equal(u.id, t.left.left.userId))
 
       val superQ = q
-        .innerJoin(q) { (a, b) =>
-          equal(a.left.left.left.userId, b.right.id)
-        }
+        .innerJoin(q)((a, b) => equal(a.left.left.left.userId, b.right.id))
         .select(x =>
           (
             x.left.left.left.left.id,
@@ -358,37 +326,23 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
       val inner = User
         .schema
         .innerJoin(
-          Book.schema.innerJoin(Book.schema) { (b, bP) =>
-            equalOptionL(b.parentId, bP.id)
-          }
-        ) { (u, t) =>
-          equal(u.id, t.left.userId)
-        }
+          Book.schema.innerJoin(Book.schema)((b, bP) => equalOptionL(b.parentId, bP.id))
+        )((u, t) => equal(u.id, t.left.userId))
 
       val q = User
         .schema
         .innerJoin(
           inner
-        ) { (u, t) =>
-          equal(u.id, t.right.right.userId)
-        }
+        )((u, t) => equal(u.id, t.right.right.userId))
 
       expectAllToBe(q.select(_.left.id))(
         2L
       )
     },
     test("(a join b) join (a join b)") {
-      val inner = Book.schema.innerJoin(Book.schema) { (b, bP) =>
-        equalOptionL(b.parentId, bP.id)
-      }
+      val inner = Book.schema.innerJoin(Book.schema)((b, bP) => equalOptionL(b.parentId, bP.id))
 
-      val q = inner
-        .innerJoin(inner) { (a, b) =>
-          equalOptionL(a.left.parentId, b.right.id)
-        }
-        .select { a =>
-          (a.left.left.id)
-        }
+      val q = inner.innerJoin(inner)((a, b) => equalOptionL(a.left.parentId, b.right.id)).select(a => (a.left.left.id))
 
       expectAllToBe(q)(
         (2L)
@@ -399,17 +353,12 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
   def leftJoinTests =
     tests(
       test("left join users and books") {
-        val q = User
-          .schema
-          .leftJoin(Book.schema) { (u, b) =>
-            equal(u.id, b.userId)
-          }
-          .select { t =>
-            val user = t.left
-            val book = t.right
+        val q = User.schema.leftJoin(Book.schema)((u, b) => equal(u.id, b.userId)).select { t =>
+          val user = t.left
+          val book = t.right
 
-            (user.name, book.underlying.name.value, book.underlying.parentId.value).tupled
-          }
+          (user.name, book.underlying.name.value, book.underlying.parentId.value).tupled
+        }
 
         expectAllToBe(q)(
           ("Jakub", "Book 1".some, none),
@@ -418,14 +367,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         )
       },
       test("#53 - joining on an optional field results in Some(None)") {
-        val q = User
-          .schema
-          .leftJoin(Book.schema) { (u, b) =>
-            equal(u.id, b.userId)
-          }
-          .select { a =>
-            a.right.underlying.parentId.value
-          }
+        val q = User.schema.leftJoin(Book.schema)((u, b) => equal(u.id, b.userId)).select(a => a.right.underlying.parentId.value)
 
         expectAllToBe(q)(none, 1L.some.some, none)
       }
@@ -434,24 +376,50 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
   var debugOn = false
 
   def debug[A]: Pipe[IO, A, A] =
-    if (debugOn) _.evalTap(s => IO(println(s))) else identity
+    if (debugOn) _.debug() else identity
 
-  def expectAllToBe[A[_[_]], Queried: Show: Diff](
-    q: Query[A, Queried]
-  )(
-    expectedList: Queried*
-  )(
-    implicit xa: Transactor[IO]
-  ): IO[Assertion] =
-    q.compileSql.stream.transact(xa).through(debug).compile.toList.attempt.map {
-      case Left(exception) =>
-        Assertion.failed(
-          show"""An exception occured, but ${expectedList.toList} was expected.
-        |Relevant query: ${pprint.apply(q).render}${scala.Console.RED}
-        |Compiled: ${q.compileSql.sql}""".stripMargin
-        ) |+| Assertion.thrown(exception)
-      case Right(values) => ensure(values, equalTo(expectedList.toList))
+  def expectAllToBe[A[_[_]], Queried: Show: Diff](q: Query[A, Queried])(expectedList: Queried*): IO[Assertion] =
+    ensure(q, predicates.resultsAre[A, Queried](equalTo(expectedList.toList)))
+
+  //todo: some of these should go to flawless
+  object predicates {
+
+    case class PredicateTrans[F[_], G[_], Inner, Outer](p: PredicateT[F, Inner] => PredicateT[G, Outer]) {
+
+      def compose[H[_], Inner0](another: PredicateT[H, Inner0] => PredicateT[F, Inner]): PredicateTrans[H, G, Inner0, Outer] =
+        PredicateTrans(p compose another)
     }
+
+    def resultsAre[A[_[_]], Queried](resultPredicate: Predicate[List[Queried]]): PredicateT[IO, Query[A, Queried]] =
+      predicateFlatten { q =>
+        streamedQuery(
+          listedStream(
+            either(
+              dumpQueryOnFailure(q),
+              resultPredicate
+            ).liftM[IO].contramap(_.attempt)
+          )
+        )
+      }
+
+    def dumpQueryOnFailure[A[_[_]], Queried](q: Query[A, Queried]): Predicate[Throwable] = Predicate { throwable =>
+      Assertion.failed(
+        show"""An exception occured.
+            |Relevant query: ${pprint.apply(q).plainText}
+            |Compiled: ${q.compileSql.sql}""".stripMargin
+      ) |+| Assertion.thrown(throwable)
+    }
+
+    def predicateFlatten[A](f: A => PredicateT[IO, A]): PredicateT[IO, A] = PredicateT(a => f(a).apply(a))
+
+    def streamedQuery[A[_[_]], Queried](streamPredicate: PredicateT[IO, fs2.Stream[IO, Queried]]): PredicateT[IO, Query[A, Queried]] =
+      streamPredicate.contramap(_.compileSql.stream.transact(xa).through(debug))
+
+    def listedStream[A](listPredicate: PredicateT[IO, IO[List[A]]]): PredicateT[IO, fs2.Stream[IO, A]] =
+      listPredicate.contramap(_.compile.toList)
+
+    def either[X, Y](left: Predicate[X], right: Predicate[Y]): Predicate[Either[X, Y]] = Predicate(_.fold(left.apply, right.apply))
+  }
 }
 
 import datas.schemas._
