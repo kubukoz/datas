@@ -34,7 +34,7 @@ val commonSettings = Seq(
     "org.tpolecat" %% "doobie-postgres" % "0.9.0",
     "org.tpolecat" %% "doobie-hikari" % "0.9.0",
     "org.typelevel" %% "simulacrum" % "1.0.0",
-    "org.typelevel" %% "cats-effect" % "2.1.3",
+    "org.typelevel" %% "cats-effect" % "2.1.4",
     "org.typelevel" %% "cats-tagless-macros" % "0.11",
     "org.typelevel" %% "cats-mtl-core" % "0.7.1",
     "co.fs2" %% "fs2-core" % "2.4.2"
