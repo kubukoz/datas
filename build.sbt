@@ -35,7 +35,7 @@ val commonSettings = Seq(
     "org.tpolecat" %% "doobie-hikari" % "0.9.2",
     "org.typelevel" %% "simulacrum" % "1.0.1",
     "org.typelevel" %% "cats-effect" % "2.3.0",
-    "org.typelevel" %% "cats-tagless-macros" % "0.11",
+    "org.typelevel" %% "cats-tagless-macros" % "0.12",
     "org.typelevel" %% "cats-mtl-core" % "0.7.1",
     "co.fs2" %% "fs2-core" % "2.4.6"
   ) ++ compilerPlugins
