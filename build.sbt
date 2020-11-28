@@ -18,9 +18,9 @@ inThisBuild(
 
 val compilerPlugins = List(
   compilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full),
-  compilerPlugin("org.typelevel" %% "kind-projector" % "0.11.0" cross CrossVersion.full),
+  compilerPlugin("org.typelevel" %% "kind-projector" % "0.11.1" cross CrossVersion.full),
   compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
-  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.5" cross CrossVersion.full)
+  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.6" cross CrossVersion.full)
 )
 
 val commonSettings = Seq(
@@ -34,10 +34,10 @@ val commonSettings = Seq(
     "org.tpolecat" %% "doobie-postgres" % "0.9.2",
     "org.tpolecat" %% "doobie-hikari" % "0.9.2",
     "org.typelevel" %% "simulacrum" % "1.0.1",
-    "org.typelevel" %% "cats-effect" % "2.2.0",
-    "org.typelevel" %% "cats-tagless-macros" % "0.12",
+    "org.typelevel" %% "cats-effect" % "2.3.0",
+    "org.typelevel" %% "cats-tagless-macros" % "0.11",
     "org.typelevel" %% "cats-mtl-core" % "0.7.1",
-    "co.fs2" %% "fs2-core" % "2.4.4"
+    "co.fs2" %% "fs2-core" % "2.4.6"
   ) ++ compilerPlugins
 )
 
