@@ -15,8 +15,8 @@ sealed trait JoinKind[A[_[_]], B[_[_]], Joined[_[_]]] {
 }
 
 object JoinKind {
-  type Inner[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, B, ?[_]]]
-  type Left[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, OptionTK[B, ?[_]], ?[_]]]
+  type Inner[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, B, *[_]]]
+  type Left[A[_[_]], B[_[_]]] = JoinKind[A, B, Tuple2KK[A, OptionTK[B, *[_]], *[_]]]
 
   def left[A[_[_]]: TraverseK, B[_[_]]: TraverseK]: Left[A, B] =
     make[A, B, Left[A, B]#Out]("left join")((a, b) => Tuple2KK(a, OptionTK.liftK(b)(Reference.liftOptionK)))
@@ -34,4 +34,5 @@ object JoinKind {
 
     val traverseK: TraverseK[Joined] = implicitly[TraverseK[Joined]]
   }
+
 }
