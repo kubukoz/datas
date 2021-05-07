@@ -21,17 +21,16 @@ object tagless {
 
     override def mapK[F[_], G[_]](af: Alg[F])(fk: F ~> G): Alg[G] = traverseK[F, cats.Id, G](af)(fk)
 
-    /**
-      * Like [[sequenceK]], but with the second effect hardcoded to [[cats.Id]] for better inference.
-      * */
+    /** Like [[sequenceK]], but with the second effect hardcoded to [[cats.Id]] for better inference.
+      */
     def sequenceKId[F[_]: Apply](alg: Alg[F]): F[Alg[cats.Id]] = sequenceK[F, cats.Id](alg)
   }
 
   // An option transformer for higher-kinded types
-  final case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, ?]]) extends AnyVal
+  final case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, *]]) extends AnyVal
 
   object OptionTK {
-    def liftK[F[_[_]]: FunctorK, G[_]](fg: F[G])(lift: G ~> OptionT[G, ?]): OptionTK[F, G] = OptionTK(fg.mapK(lift))
+    def liftK[F[_[_]]: FunctorK, G[_]](fg: F[G])(lift: G ~> OptionT[G, *]): OptionTK[F, G] = OptionTK(fg.mapK(lift))
 
     import TraverseK.ops._
 
@@ -47,12 +46,14 @@ object tagless {
         alg
           .underlying
           .traverseK[H, OptionT[I, *]] {
-            λ[OptionT[G, *] ~> λ[a => H[OptionT[I, a]]]] {
-              case fa: OptionT[G, a] => optionTTraverseK[a].traverseK(fa)(fk)
+            λ[OptionT[G, *] ~> λ[a => H[OptionT[I, a]]]] { case fa: OptionT[G, a] =>
+              optionTTraverseK[a].traverseK(fa)(fk)
             }
           }
           .map(OptionTK(_))
+
     }
+
   }
 
   // A tuple2 of algebras in the same effect.
@@ -69,5 +70,7 @@ object tagless {
       def traverseK[F[_], G[_]: Apply, H[_]](alg: Tuple2KK[A, B, F])(fk: F ~> λ[a => G[H[a]]]): G[Tuple2KK[A, B, H]] =
         (alg.left.traverseK(fk), alg.right.traverseK(fk)).mapN(Tuple2KK(_, _))
     }
+
   }
+
 }

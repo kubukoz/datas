@@ -10,9 +10,9 @@ inThisBuild(
         "kubukoz",
         "Jakub Kozłowski",
         "kubukoz@gmail.com",
-        url("https://kubukoz.com")
+        url("https://kubukoz.com"),
       )
-    )
+    ),
   )
 )
 
@@ -20,7 +20,7 @@ val compilerPlugins = List(
   compilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full),
   compilerPlugin("org.typelevel" %% "kind-projector" % "0.11.3" cross CrossVersion.full),
   compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
-  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.6" cross CrossVersion.full)
+  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.8" cross CrossVersion.full),
 )
 
 val commonSettings = Seq(
@@ -28,17 +28,16 @@ val commonSettings = Seq(
   scalacOptions -= "-Xfatal-warnings",
   scalacOptions += "-P:typed-holes:log-level:info",
   name := "datas",
-  updateOptions := updateOptions.value.withGigahorse(false),
   libraryDependencies ++= Seq(
     "org.tpolecat" %% "doobie-core" % "0.9.2",
     "org.tpolecat" %% "doobie-postgres" % "0.9.2",
     "org.tpolecat" %% "doobie-hikari" % "0.9.2",
     "org.typelevel" %% "simulacrum" % "1.0.1",
     "org.typelevel" %% "cats-effect" % "2.4.1",
-    "org.typelevel" %% "cats-tagless-macros" % "0.13.0",
+    "org.typelevel" %% "cats-tagless-macros" % "0.11",
     "org.typelevel" %% "cats-mtl-core" % "0.7.1",
-    "co.fs2" %% "fs2-core" % "2.5.4"
-  ) ++ compilerPlugins
+    "co.fs2" %% "fs2-core" % "2.5.4",
+  ) ++ compilerPlugins,
 )
 
 val core =
@@ -51,10 +50,10 @@ val tests = project
     libraryDependencies ++= Seq(
       "com.kubukoz" %% "flawless-core" % "0.1.0-M11",
       "com.lihaoyi" %% "pprint" % "0.5.5",
-      "ch.qos.logback" % "logback-classic" % "1.2.3"
-    )
+      "ch.qos.logback" % "logback-classic" % "1.2.3",
+    ),
   )
   .dependsOn(core)
 
 val datas =
-  project.in(file(".")).settings(commonSettings).settings(skip in publish := true).dependsOn(core).aggregate(core)
+  project.in(file(".")).settings(commonSettings).settings((publish / skip) := true).dependsOn(core).aggregate(core)

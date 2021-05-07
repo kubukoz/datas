@@ -47,7 +47,7 @@ object Reference {
   final case class Product[L, R](left: Reference[L], right: Reference[R]) extends Reference[(L, R)]
   final case class Map[A, B](underlying: Reference[A], f: A => B) extends Reference[B]
 
-  val liftOptionK: Reference ~> OptionT[Reference, ?] = λ[Reference ~> OptionT[Reference, ?]](r => OptionT(liftOption(r)))
+  val liftOptionK: Reference ~> OptionT[Reference, *] = λ[Reference ~> OptionT[Reference, *]](r => OptionT(liftOption(r)))
 
   def liftOption[Type](reference: Reference[Type]): Reference[Option[Type]] = Optional(reference)
 
@@ -83,6 +83,7 @@ object Reference {
 
     case p: Reference.Product[a, b] => (compileReference(p.left), compileReference(p.right)).tupled
   }
+
 }
 
 final case class CompiledReference[A](frag: Fragment, get: CompiledGet.Freed[A])
@@ -95,7 +96,9 @@ object CompiledReference {
     def ap[A, B](ff: CompiledReference[A => B])(fa: CompiledReference[A]): CompiledReference[B] =
       // Ordering matters - `fa` needs to be sequenced before `ff`, but the first fragment comes from `ff` (in `product`).
       CompiledReference(ff.frag ++ fr0"," ++ fa.frag, (fa.get, ff.get).mapN((a, f) => f(a)))
+
   }
+
 }
 
 sealed trait CompiledGet[A] extends Product with Serializable {
