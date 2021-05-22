@@ -6,12 +6,10 @@ import cats.arrow.FunctionK
 import cats.~>
 import cats.data.OptionT
 import cats.tagless.implicits._
-import simulacrum.typeclass
 import cats.implicits._
 
 object tagless {
 
-  @typeclass
   trait TraverseK[Alg[_[_]]] extends FunctorK[Alg] {
 
     def traverseK[F[_], G[_]: Apply, H[_]](alg: Alg[F])(fk: F ~> λ[a => G[H[a]]]): G[Alg[H]]
@@ -26,18 +24,27 @@ object tagless {
     def sequenceKId[F[_]: Apply](alg: Alg[F]): F[Alg[cats.Id]] = sequenceK[F, cats.Id](alg)
   }
 
+  object TraverseK {
+    def apply[Alg[_[_]]](implicit Alg: TraverseK[Alg]): TraverseK[Alg] = Alg
+
+    implicit final class TraverseKOps[Alg[_[_]], F[_]](private val alg: Alg[F]) extends AnyVal {
+      def traverseK[G[_]: Apply, H[_]](fk: F ~> λ[a => G[H[a]]])(implicit ev: TraverseK[Alg]): G[Alg[H]] = ev.traverseK(alg)(fk)
+    }
+
+  }
+
   // An option transformer for higher-kinded types
   final case class OptionTK[F[_[_]], G[_]](underlying: F[OptionT[G, *]]) extends AnyVal
 
   object OptionTK {
     def liftK[F[_[_]]: FunctorK, G[_]](fg: F[G])(lift: G ~> OptionT[G, *]): OptionTK[F, G] = OptionTK(fg.mapK(lift))
 
-    import TraverseK.ops._
-
     //TraverseK for OptionT
     private implicit def optionTTraverseK[A]: TraverseK[OptionT[*[_], A]] = new TraverseK[OptionT[*[_], A]] {
       def traverseK[F[_], G[_]: Apply, H[_]](alg: OptionT[F, A])(fk: F ~> λ[a => G[H[a]]]): G[OptionT[H, A]] = fk(alg.value).map(OptionT(_))
     }
+
+    import TraverseK._
 
     //TraverseK for OptionTK
     implicit def traverseK[F[_[_]]: TraverseK]: TraverseK[OptionTK[F, *[_]]] = new TraverseK[OptionTK[F, *[_]]] {
@@ -63,7 +70,7 @@ object tagless {
 
   object Tuple2KK {
 
-    import TraverseK.ops._
+    import TraverseK._
 
     implicit def traverseK[A[_[_]]: TraverseK, B[_[_]]: TraverseK]: TraverseK[Tuple2KK[A, B, *[_]]] = new TraverseK[Tuple2KK[A, B, *[_]]] {
 

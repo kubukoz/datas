@@ -7,15 +7,14 @@ import doobie.implicits._
 import cats.data.Chain
 import cats.tagless.FunctorK
 import cats.tagless.implicits._
-import cats.mtl.instances.all._
+
 import cats.FlatMap
 import cats.data.NonEmptyChain
 import datas.tagless.TraverseK
 import datas.QueryBase.TableName
 import scala.annotation.tailrec
 
-/**
-  * QueryBase: a thing you can query from. It'll usually be a table or a join thereof.
+/** QueryBase: a thing you can query from. It'll usually be a table or a join thereof.
   */
 sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
@@ -70,6 +69,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
     go(this :: Nil, Chain.nil)
   }
+
 }
 
 private[datas] object QueryBase {
@@ -79,13 +79,12 @@ private[datas] object QueryBase {
     left: QueryBase[A],
     right: QueryBase[B],
     kind: JoinKind[A, B, Joined],
-    onClause: (A[Reference], B[Reference]) => Reference[Boolean]
+    onClause: (A[Reference], B[Reference]) => Reference[Boolean],
   ) extends QueryBase[Joined] {
     val traverseK: TraverseK[Joined] = kind.traverseK
   }
 
-  /**
-    * Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
+  /** Returns: the compiled query base (from + joins) and the scoped references underlying it (passed later to selections and filters).
     */
   def compileQuery[A[_[_]], F[_]: IndexState: FlatMap]: QueryBase[A] => F[(Fragment, A[Reference])] = {
     case t: FromTable[A] =>
@@ -94,7 +93,7 @@ private[datas] object QueryBase {
         val scope = t.table.indexed(index).name
         (
           t.table.identifierFragment ++ Fragment.const(scope),
-          t.lifted.mapK(setScope(scope))
+          t.lifted.mapK(setScope(scope)),
         )
       }
 
@@ -114,4 +113,5 @@ private[datas] object QueryBase {
     def identifierFragment: Fragment = Fragment.const("\"" + name + "\"")
     def indexed(index: Int): TableName = TableName(name + "_x" + index)
   }
+
 }

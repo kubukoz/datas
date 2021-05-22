@@ -1,11 +1,11 @@
 import cats.~>
-import cats.mtl.MonadState
+import cats.mtl.Stateful
 import cats.Apply
 import cats.implicits._
 
 package object datas {
 
-  private[datas] type IndexState[F[_]] = MonadState[F, Int]
+  private[datas] type IndexState[F[_]] = Stateful[F, Int]
 
   private[datas] object IndexState {
     def apply[F[_]](implicit F: IndexState[F]): IndexState[F] = F
@@ -14,13 +14,14 @@ package object datas {
 
   private[datas] def setScope(scope: String): Reference ~> Reference = Reference.mapData {
     λ[ReferenceData ~> ReferenceData] {
-      case ReferenceData.Column(n, None) =>
+      case ReferenceData.Column(n, None)        =>
         ReferenceData.Column(n, Some(scope))
       case c @ ReferenceData.Column(_, Some(_)) =>
         //todo this case is impossible, we should have that in the types
         //or else inline it with the catch-all below
         c
-      case c => c
+      case c                                    => c
     }
   }
+
 }

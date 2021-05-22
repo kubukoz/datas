@@ -29,14 +29,13 @@ val commonSettings = Seq(
   scalacOptions += "-P:typed-holes:log-level:info",
   name := "datas",
   libraryDependencies ++= Seq(
-    "org.tpolecat" %% "doobie-core" % "0.9.2",
-    "org.tpolecat" %% "doobie-postgres" % "0.9.2",
-    "org.tpolecat" %% "doobie-hikari" % "0.9.2",
-    "org.typelevel" %% "simulacrum" % "1.0.1",
-    "org.typelevel" %% "cats-effect" % "2.5.1",
-    "org.typelevel" %% "cats-tagless-macros" % "0.11",
-    "org.typelevel" %% "cats-mtl-core" % "0.7.1",
-    "co.fs2" %% "fs2-core" % "2.5.6",
+    "org.tpolecat" %% "doobie-core" % "1.0.0-M4",
+    "org.tpolecat" %% "doobie-postgres" % "1.0.0-M4",
+    "org.tpolecat" %% "doobie-hikari" % "1.0.0-M4",
+    "org.typelevel" %% "cats-effect" % "3.1.1",
+    "org.typelevel" %% "cats-tagless-macros" % "0.13.0",
+    "org.typelevel" %% "cats-mtl" % "1.2.1",
+    "co.fs2" %% "fs2-core" % "3.0.2",
   ) ++ compilerPlugins,
 )
 
@@ -48,7 +47,7 @@ val tests = project
   .settings(
     fork := true,
     libraryDependencies ++= Seq(
-      "com.kubukoz" %% "flawless-core" % "0.1.0-M11",
+      "com.kubukoz" %% "flawless-core" % "0.1.0-M12",
       "com.lihaoyi" %% "pprint" % "0.5.5",
       "ch.qos.logback" % "logback-classic" % "1.2.3",
     ),

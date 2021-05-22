@@ -2,7 +2,7 @@ package tests
 
 import doobie.Transactor
 import doobie.implicits._
-import cats.effect.{test => _, _}
+import cats.effect._
 import cats.implicits._
 import cats.~>
 import fs2.Pipe

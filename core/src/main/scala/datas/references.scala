@@ -95,7 +95,8 @@ object CompiledReference {
 
     def ap[A, B](ff: CompiledReference[A => B])(fa: CompiledReference[A]): CompiledReference[B] =
       // Ordering matters - `fa` needs to be sequenced before `ff`, but the first fragment comes from `ff` (in `product`).
-      CompiledReference(ff.frag ++ fr0"," ++ fa.frag, (fa.get, ff.get).mapN((a, f) => f(a)))
+      CompiledReference(ff.frag ++ fr0"," ++ fa.frag, (ff.get, fa.get).mapN((f, a) => f(a)))
+      // CompiledReference(ff.frag ++ fr0"," ++ fa.frag, (fa.get, ff.get).mapN((a, f) => f(a)))
 
   }
 

@@ -4,14 +4,14 @@ import cats.data.Chain
 import doobie.util.query.Query0
 import cats.data.State
 import doobie.implicits._
-import cats.mtl.instances.all._
+
 import doobie.util.Read
 import doobie.Fragments
 
 final case class Query[A[_[_]], Queried](
   base: QueryBase[A],
   selection: A[Reference] => Reference[Queried],
-  filters: Chain[A[Reference] => Reference[Boolean]]
+  filters: Chain[A[Reference] => Reference[Boolean]],
 ) {
 
   def where(filter: A[Reference] => Reference[Boolean]): Query[A, Queried] =
@@ -34,4 +34,5 @@ final case class Query[A[_[_]], Queried](
 
     frag.query[Queried]
   }
+
 }
