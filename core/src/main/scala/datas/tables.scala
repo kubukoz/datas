@@ -2,7 +2,7 @@ package datas
 
 import cats.implicits._
 import doobie.util.fragment.Fragment
-import doobie._
+import doobie.{Query => _, _}
 import doobie.implicits._
 import cats.data.Chain
 import cats.tagless.FunctorK
@@ -56,7 +56,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
     Query(this, selection, filters = Chain.empty)
 
   private[datas] def traverseK: TraverseK[A]
-
+  /*
   //public API? (diagnostics)
   //todo: use to see if any of the tables appears more than once
   private[datas] def tableNames: NonEmptyChain[TableName] = {
@@ -69,7 +69,7 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
     go(this :: Nil, Chain.nil)
   }
-
+   */
 }
 
 private[datas] object QueryBase {
