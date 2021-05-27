@@ -28,9 +28,9 @@ val commonSettings = Seq(
   scalacOptions += "-P:typed-holes:log-level:info",
   name := "datas",
   libraryDependencies ++= Seq(
-    "org.tpolecat" %% "doobie-core" % "1.0.0-M4",
-    "org.tpolecat" %% "doobie-postgres" % "1.0.0-M4",
-    "org.tpolecat" %% "doobie-hikari" % "1.0.0-M4",
+    "org.tpolecat" %% "doobie-core" % "1.0.0-M5",
+    "org.tpolecat" %% "doobie-postgres" % "1.0.0-M5",
+    "org.tpolecat" %% "doobie-hikari" % "1.0.0-M5",
     "org.typelevel" %% "cats-effect" % "3.1.1",
     "org.typelevel" %% "cats-tagless-core" % "0.14.0",
     "org.typelevel" %% "cats-mtl" % "1.2.1",
