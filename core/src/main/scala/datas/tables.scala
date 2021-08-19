@@ -6,7 +6,6 @@ import doobie.implicits._
 import cats.data.Chain
 import cats.tagless.FunctorK
 import cats.tagless.implicits._
-
 import cats.FlatMap
 import cats.data.NonEmptyChain
 import datas.tagless.TraverseK
