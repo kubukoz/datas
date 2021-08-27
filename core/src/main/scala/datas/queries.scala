@@ -4,7 +4,6 @@ import cats.data.Chain
 import doobie.util.query.Query0
 import cats.data.State
 import doobie.implicits._
-
 import doobie.util.Read
 import doobie.Fragments
 
