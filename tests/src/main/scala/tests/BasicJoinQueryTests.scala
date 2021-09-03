@@ -23,8 +23,8 @@ import cats.data.NonEmptyList
 final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[IO] {
   import flawless.syntax._
 
-  implicit def showTuple3[A: Show, B: Show, C: Show]: Show[(A, B, C)] = {
-    case (a, b, c) => show"($a, $b, $c)"
+  implicit def showTuple3[A: Show, B: Show, C: Show]: Show[(A, B, C)] = { case (a, b, c) =>
+    show"($a, $b, $c)"
   }
 
   implicit def showTuple9[
@@ -36,10 +36,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     A6: Show,
     A7: Show,
     A8: Show,
-    A9: Show
-  ]: Show[(A1, A2, A3, A4, A5, A6, A7, A8, A9)] = {
-    case (a, b, c, d, e, f, g, h, i) =>
-      NonEmptyList.of[cats.Show.Shown](a, b, c, d, e, f, g, h, i).map(_.toString).mkString_("(", ", ", ")")
+    A9: Show,
+  ]: Show[(A1, A2, A3, A4, A5, A6, A7, A8, A9)] = { case (a, b, c, d, e, f, g, h, i) =>
+    NonEmptyList.of[cats.Show.Shown](a, b, c, d, e, f, g, h, i).map(_.toString).mkString_("(", ", ", ")")
   }
 
   import datas.ops._
@@ -51,7 +50,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           singleColumnTests,
           singleTableTests,
           innerJoinTests,
-          leftJoinTests
+          leftJoinTests,
         )
         .reduce
     }
@@ -97,7 +96,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         val q = User.schema.select(u => equal(u.name, Reference.lift("Jon")))
 
         expectAllToBe(q)(true, false, false)
-      }
+      },
     )
 
   def singleTableTests =
@@ -110,14 +109,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
             .select(u =>
               (
                 u.name,
-                u.age
+                u.age,
               ).tupled
             )
 
         expectAllToBe(q)(
           ("Jon", 36),
           ("Jakub", 23),
-          ("John", 40)
+          ("John", 40),
         )
       },
       test("querying equalities") {
@@ -128,14 +127,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
             .select(u =>
               (
                 equal(u.age, Reference.lift(23)),
-                equal(Reference.lift(5), Reference.lift(10))
+                equal(Reference.lift(5), Reference.lift(10)),
               ).tupled
             )
 
         expectAllToBe(q)(
           (false, false),
           (true, false),
-          (false, false)
+          (false, false),
         )
       },
       test("conditions in queries") {
@@ -146,7 +145,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
             .select(u =>
               (
                 u.name,
-                u.age
+                u.age,
               ).tupled
             )
             .where(u => over(u.age, Reference.lift(24)))
@@ -163,7 +162,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
             (
               Reference.lift(true),
               Reference.liftOption(Reference.lift(5L)),
-              u.age.as(false)
+              u.age.as(false),
             ).tupled
           }
 
@@ -171,7 +170,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           List(
             (true, Some(5L), false),
             (true, Some(5L), false),
-            (true, Some(5L), false)
+            (true, Some(5L), false),
           ): _*
         )
       },
@@ -188,7 +187,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
 
         expectAllToBe(q)(
           Tuple2KK(User[cats.Id](2, "Jakub", 23), Book[cats.Id](1, 2, None, "Book 1")),
-          Tuple2KK(User[cats.Id](3, "John", 40), Book[cats.Id](2, 3, Some(1), "Book 2"))
+          Tuple2KK(User[cats.Id](3, "John", 40), Book[cats.Id](2, 3, Some(1), "Book 2")),
         )
       },
       test("select all from left join") {
@@ -205,9 +204,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
                 OptionT[cats.Id, Long](1L.some),
                 OptionT[cats.Id, Long](2L.some),
                 OptionT[cats.Id, Option[Long]](none),
-                OptionT[cats.Id, String]("Book 1".some)
+                OptionT[cats.Id, String]("Book 1".some),
               )
-            )
+            ),
           ),
           Tuple2KK(
             User[cats.Id](3, "John", 40),
@@ -216,9 +215,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
                 OptionT[cats.Id, Long](2L.some),
                 OptionT[cats.Id, Long](3L.some),
                 OptionT[cats.Id, Option[Long]](1L.some.some),
-                OptionT[cats.Id, String]("Book 2".some)
+                OptionT[cats.Id, String]("Book 2".some),
               )
-            )
+            ),
           ),
           Tuple2KK(
             User[cats.Id](1, "Jon", 36),
@@ -227,12 +226,12 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
                 OptionT[cats.Id, Long](none),
                 OptionT[cats.Id, Long](none),
                 OptionT[cats.Id, Option[Long]](none),
-                OptionT[cats.Id, String](none)
+                OptionT[cats.Id, String](none),
               )
-            )
-          )
+            ),
+          ),
         )
-      }
+      },
     )
 
   def innerJoinTests = tests(
@@ -245,7 +244,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
 
       expectAllToBe(q)(
         ("Jakub", 1L),
-        ("John", 2L)
+        ("John", 2L),
       )
     },
     test("(a join b) join c)") {
@@ -290,7 +289,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         .select(_.right.id)
 
       expectAllToBe(q)(
-        (3L)
+        3L
       )
     },
     test("(((a join b) join c) join d) join (((e join f) join g) join h)") {
@@ -314,7 +313,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
             x.right.left.left.right.id,
             x.right.left.left.right.parentId,
             x.right.left.right.id,
-            x.right.right.id
+            x.right.right.id,
           ).tupled
         )
 
@@ -345,9 +344,9 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
       val q = inner.innerJoin(inner)((a, b) => equalOptionL(a.left.parentId, b.right.id)).select(a => (a.left.left.id))
 
       expectAllToBe(q)(
-        (2L)
+        2L
       )
-    }
+    },
   )
 
   def leftJoinTests =
@@ -363,14 +362,14 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
         expectAllToBe(q)(
           ("Jakub", "Book 1".some, none),
           ("John", "Book 2".some, 1L.some.some),
-          ("Jon", none, none)
+          ("Jon", none, none),
         )
       },
       test("#53 - joining on an optional field results in Some(None)") {
         val q = User.schema.leftJoin(Book.schema)((u, b) => equal(u.id, b.userId)).select(a => a.right.underlying.parentId.value)
 
         expectAllToBe(q)(none, 1L.some.some, none)
-      }
+      },
     )
 
   var debugOn = false
@@ -396,7 +395,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
           listedStream(
             either(
               dumpQueryOnFailure(q),
-              resultPredicate
+              resultPredicate,
             ).liftM[IO].contramap(_.attempt)
           )
         )
@@ -420,6 +419,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
 
     def either[X, Y](left: Predicate[X], right: Predicate[Y]): Predicate[Either[X, Y]] = Predicate(_.fold(left.apply, right.apply))
   }
+
 }
 
 import datas.schemas._
@@ -438,7 +438,7 @@ object User {
   val schema: QueryBase[User] =
     caseClassSchema(
       "users",
-      User(column[Long]("id"), column[String]("name"), column[Int]("age"))
+      User(column[Long]("id"), column[String]("name"), column[Int]("age")),
     )
 
   implicit val showId: Show[User[cats.Id]] = Show.fromToString
@@ -461,7 +461,8 @@ object Book {
         column[Long]("id"),
         column[Long]("user_id"),
         column[Long]("parent_id").optional,
-        column[String]("name")
-      )
+        column[String]("name"),
+      ),
     )
+
 }
