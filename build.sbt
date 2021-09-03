@@ -17,7 +17,7 @@ inThisBuild(
 )
 
 val compilerPlugins = List(
-  compilerPlugin("org.typelevel" %% "kind-projector" % "0.13.0" cross CrossVersion.full),
+  compilerPlugin("org.typelevel" %% "kind-projector" % "0.13.2" cross CrossVersion.full),
   compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
   compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.9" cross CrossVersion.full),
 )
