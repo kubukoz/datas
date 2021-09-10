@@ -1,4 +1,5 @@
 import cats.~>
+
 import cats.mtl.Stateful
 import cats.Apply
 import cats.implicits._
