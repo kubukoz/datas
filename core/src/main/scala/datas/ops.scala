@@ -1,4 +1,5 @@
 package datas
+
 import doobie._
 import doobie.implicits._
 
@@ -13,6 +14,7 @@ object ops {
       val _ = isBool
       binary(_ ++ fr"or" ++ _)(self, another)
     }
+
   }
 
   implicit final class LiftAny[Type](private val self: Type) extends AnyVal {
@@ -33,7 +35,7 @@ object ops {
   def notNull[Type](a: Reference[Option[Type]]): Reference[Boolean] =
     Reference.Single(
       ReferenceData.Raw(a.compile.frag ++ fr"is not null"),
-      Get[Boolean]
+      Get[Boolean],
     )
 
   def nonEqual[Type]: (Reference[Type], Reference[Type]) => Reference[Boolean] =
@@ -42,6 +44,7 @@ object ops {
   def binary[L, R](f: (Fragment, Fragment) => Fragment)(l: Reference[L], r: Reference[R]): Reference[Boolean] =
     Reference.Single(
       ReferenceData.Raw(f(l.compile.frag, r.compile.frag)),
-      Get[Boolean]
+      Get[Boolean],
     )
+
 }
