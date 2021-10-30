@@ -39,14 +39,14 @@ object tagless {
   object OptionTK {
     def liftK[F[_[_]]: FunctorK, G[_]](fg: F[G])(lift: G ~> OptionT[G, *]): OptionTK[F, G] = OptionTK(fg.mapK(lift))
 
-    //TraverseK for OptionT
+    // TraverseK for OptionT
     private implicit def optionTTraverseK[A]: TraverseK[OptionT[*[_], A]] = new TraverseK[OptionT[*[_], A]] {
       def traverseK[F[_], G[_]: Apply, H[_]](alg: OptionT[F, A])(fk: F ~> λ[a => G[H[a]]]): G[OptionT[H, A]] = fk(alg.value).map(OptionT(_))
     }
 
     import TraverseK._
 
-    //TraverseK for OptionTK
+    // TraverseK for OptionTK
     implicit def traverseK[F[_[_]]: TraverseK]: TraverseK[OptionTK[F, *[_]]] = new TraverseK[OptionTK[F, *[_]]] {
 
       def traverseK[G[_], H[_]: Apply, I[_]](alg: OptionTK[F, G])(fk: G ~> λ[a => H[I[a]]]): H[OptionTK[F, I]] =

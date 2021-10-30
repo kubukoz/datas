@@ -56,12 +56,12 @@ sealed trait QueryBase[A[_[_]]] extends Product with Serializable {
 
   private[datas] def traverseK: TraverseK[A]
 
-  //public API? (diagnostics)
-  //todo: use to see if any of the tables appears more than once
+  // public API? (diagnostics)
+  // todo: use to see if any of the tables appears more than once
   private[datas] def tableNames: NonEmptyChain[TableName] = {
     @tailrec
     def go[s[_[_]]](stack: List[QueryBase[s]], memory: Chain[TableName]): NonEmptyChain[TableName] = stack match {
-      case Nil                                  => NonEmptyChain.fromChainUnsafe(memory) //totally safe
+      case Nil                                  => NonEmptyChain.fromChainUnsafe(memory) // totally safe
       case (t: QueryBase.FromTable[_]) :: tail  => go(tail, memory.append(t.table))
       case (j: QueryBase.Join[_, _, _]) :: tail => go(j.left :: j.right :: tail, memory)
     }
