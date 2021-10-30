@@ -380,7 +380,7 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
   def expectAllToBe[A[_[_]], Queried: Show: Diff](q: Query[A, Queried])(expectedList: Queried*): IO[Assertion] =
     ensure(q, predicates.resultsAre[A, Queried](equalTo(expectedList.toList)))
 
-  //todo: some of these should go to flawless
+  // todo: some of these should go to flawless
   object predicates {
 
     case class PredicateTrans[F[_], G[_], Inner, Outer](p: PredicateT[F, Inner] => PredicateT[G, Outer]) {

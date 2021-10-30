@@ -26,7 +26,7 @@ object ReferenceData {
 
     case l: ReferenceData.Lift[a] =>
       implicit val putType: Put[a] = l.put
-      val _ = putType //to make scalac happy
+      val _ = putType // to make scalac happy
       TypedFragment(fr"${l.value}", getType)
 
     case r: ReferenceData.Raw[a] => TypedFragment(r.fragment, getType)

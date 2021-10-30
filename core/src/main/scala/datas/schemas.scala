@@ -23,7 +23,7 @@ object schemas {
       Reference.liftOption(columnKToReference(underlying))
   }
 
-  //todo naming
+  // todo naming
   sealed trait ColumnK[A] extends Product with Serializable {
     def optional: ColumnK[Option[A]] = ColumnK.Optional(this)
   }

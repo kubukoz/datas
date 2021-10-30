@@ -51,7 +51,7 @@ object DatasTests extends IOApp with TestApp {
 
     val unload = sql"""DROP SCHEMA public CASCADE;CREATE SCHEMA public;""".update.run.transact(xa).void
 
-    //ensure unload happens even if load fails
+    // ensure unload happens even if load fails
     unload *> load
   }
 

@@ -18,8 +18,8 @@ package object datas {
       case ReferenceData.Column(n, None)        =>
         ReferenceData.Column(n, Some(scope))
       case c @ ReferenceData.Column(_, Some(_)) =>
-        //todo this case is impossible, we should have that in the types
-        //or else inline it with the catch-all below
+        // todo this case is impossible, we should have that in the types
+        // or else inline it with the catch-all below
         c
       case c                                    => c
     }
