@@ -23,7 +23,7 @@ val compilerPlugins = List(
 )
 
 val commonSettings = Seq(
-  scalaVersion := "2.13.6",
+  scalaVersion := "2.13.10",
   scalacOptions -= "-Xfatal-warnings",
   scalacOptions += "-P:typed-holes:log-level:info",
   name := "datas",
