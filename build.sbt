@@ -17,15 +17,13 @@ inThisBuild(
 )
 
 val compilerPlugins = List(
-  compilerPlugin("org.typelevel" %% "kind-projector" % "0.13.0" cross CrossVersion.full),
+  compilerPlugin("org.typelevel" %% "kind-projector" % "0.13.3" cross CrossVersion.full),
   compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1"),
-  compilerPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.9" cross CrossVersion.full),
 )
 
 val commonSettings = Seq(
-  scalaVersion := "2.13.6",
+  scalaVersion := "2.13.16",
   scalacOptions -= "-Xfatal-warnings",
-  scalacOptions += "-P:typed-holes:log-level:info",
   name := "datas",
   libraryDependencies ++= Seq(
     "org.tpolecat" %% "doobie-core" % "1.0.0-M4",
@@ -46,7 +44,7 @@ val tests = project
   .settings(
     fork := true,
     libraryDependencies ++= Seq(
-      "com.kubukoz" %% "flawless-core" % "0.1.0-M12+19-c0c071b1-SNAPSHOT",
+      "com.kubukoz" %% "flawless-core" % "0.1.0-M12+38-23b5ce1a-SNAPSHOT",
       "com.lihaoyi" %% "pprint" % "0.5.5",
       "ch.qos.logback" % "logback-classic" % "1.2.3",
     ),

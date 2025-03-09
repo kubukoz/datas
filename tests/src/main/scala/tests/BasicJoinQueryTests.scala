@@ -59,7 +59,6 @@ final class BasicJoinQueryTests(implicit xa: Transactor[IO]) extends SuiteClass[
     tests(
       test("select single column from table") {
         val q = User.schema.select(_.name)
-
         expectAllToBe(q)("Jon", "Jakub", "John")
       },
       test("select second column from table") {
